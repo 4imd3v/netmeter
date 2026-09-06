@@ -1,0 +1,16 @@
+# NetMeter defaults. Copy to /etc/netmeter/config.toml or
+# ~/.config/netmeter/config.toml and edit. See PRD.md §11.
+poll_interval_sec = 5
+database_path = "/var/lib/netmeter/netmeter.db"
+units = "binary"        # binary | decimal
+timezone = "local"      # local | utc
+exclude_ifaces = ["lo", "docker*", "veth*", "br-*", "virbr*"]
+lan_subnets = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fe80::/10", "fc00::/7"]
+classify_tailscale_as_lan = true
+force_lan_ifaces = ["tailscale0*", "zt*"]
+retention_days_raw = 30
+retention_days_hourly = 365
+max_rate_mbit = 10000
+monthly_budget_gb = 0   # 0 = off
+budget_basis = "total"  # total | wan
+notify_on_budget = true

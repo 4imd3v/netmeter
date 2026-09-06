@@ -1,0 +1,11 @@
+[Unit]
+Description=NetMeter budget notifier (user session)
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/netmeter user-agent
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,22 @@
+[Unit]
+Description=NetMeter bandwidth meter
+After=network.target time-sync.target
+Wants=time-sync.target
+
+[Service]
+Type=simple
+User=netmeter
+Group=netmeter
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelModules=true
+ReadWritePaths=/var/lib/netmeter
+ExecStart=/usr/bin/netmeter daemon run
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

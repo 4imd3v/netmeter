@@ -93,7 +93,12 @@ impl ProcSampler {
 
     /// Drain frames for up to ~300ms. Returns false on fatal channel error.
     pub fn poll(&mut self) -> bool {
-        let deadline = Instant::now() + Duration::from_millis(300);
+        self.poll_budget(Duration::from_millis(300))
+    }
+
+    /// Drain frames for up to `budget`. Returns false on fatal channel error.
+    pub fn poll_budget(&mut self, budget: Duration) -> bool {
+        let deadline = Instant::now() + budget;
         loop {
             match self.rx.next() {
                 Ok(frame) => account(frame, &self.owners, &self.local, &mut self.cum),

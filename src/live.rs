@@ -49,20 +49,32 @@ fn live_loop(
     let mut sampler = ProcSampler::start(iface_filter.clone()).ok();
     let mut app_rates: Vec<crate::top_proc::ProcRate> = vec![];
 
-    loop {
-        std::thread::sleep(Duration::from_millis(interval_ms));
-        if crossterm::event::poll(Duration::from_millis(0))? {
-            if let crossterm::event::Event::Key(k) = crossterm::event::read()? {
-                match k.code {
-                    crossterm::event::KeyCode::Char('q') | crossterm::event::KeyCode::Esc => break,
-                    crossterm::event::KeyCode::Char('u') => dec = !dec,
-                    crossterm::event::KeyCode::Char('+') | crossterm::event::KeyCode::Char('=') => {
-                        interval_ms = (interval_ms - 250).max(250)
+    'outer: loop {
+        // event-driven wait: keys stay responsive (≤100ms) while capture
+        // fills idle time instead of blocking the tick afterwards
+        let deadline = Instant::now() + Duration::from_millis(interval_ms);
+        while let Some(remain) = deadline.checked_duration_since(Instant::now()) {
+            if crossterm::event::poll(remain.min(Duration::from_millis(100)))? {
+                if let crossterm::event::Event::Key(k) = crossterm::event::read()? {
+                    match k.code {
+                        crossterm::event::KeyCode::Char('q') | crossterm::event::KeyCode::Esc => {
+                            break 'outer;
+                        }
+                        crossterm::event::KeyCode::Char('u') => dec = !dec,
+                        crossterm::event::KeyCode::Char('+')
+                        | crossterm::event::KeyCode::Char('=') => {
+                            interval_ms = (interval_ms - 250).max(250)
+                        }
+                        crossterm::event::KeyCode::Char('-') => {
+                            interval_ms = (interval_ms + 250).min(5000)
+                        }
+                        _ => {}
                     }
-                    crossterm::event::KeyCode::Char('-') => {
-                        interval_ms = (interval_ms + 250).min(5000)
-                    }
-                    _ => {}
+                }
+            }
+            if let Some(sm) = sampler.as_mut() {
+                if !sm.poll_budget(Duration::from_millis(50)) {
+                    sampler = None; // channel died; fall back to hint panel
                 }
             }
         }
@@ -128,12 +140,8 @@ fn live_loop(
             month_split = split;
         }
         if let Some(sm) = sampler.as_mut() {
-            if sm.poll() {
-                app_rates = sm.rates();
-                app_rates.truncate(12);
-            } else {
-                sampler = None; // channel died; fall back to hint panel
-            }
+            app_rates = sm.rates();
+            app_rates.truncate(12);
         }
         let uptime = started.elapsed().as_secs();
         let sess_rx: u64 = session.values().map(|v| v.0).sum();

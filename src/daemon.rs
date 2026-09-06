@@ -219,19 +219,19 @@ fn enforce_retention(conn: &rusqlite::Connection, cfg: &Config) -> Result<()> {
 }
 
 fn check_budget(conn: &rusqlite::Connection, cfg: &Config, tz_local: bool) -> Result<()> {
-    if cfg.monthly_budget_gb <= 0.0 {
+    let Some((period, gb)) = cfg.effective_budget() else {
         return Ok(());
-    }
+    };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let mon_start = db::floor_month(now, tz_local);
-    let key = db::month_key(now, tz_local);
+    let start = db::budget_window_start(now, tz_local, period);
+    let key = db::budget_key(now, tz_local, period);
     let (rx, tx, lrx, ltx): (i64, i64, i64, i64) = conn
         .query_row(
             "SELECT COALESCE(SUM(rx_total),0), COALESCE(SUM(tx_total),0), COALESCE(SUM(lan_rx),0), COALESCE(SUM(lan_tx),0) FROM samples WHERE ts>=?1",
-            params![mon_start],
+            params![start],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .unwrap_or((0, 0, 0, 0));
@@ -240,21 +240,22 @@ fn check_budget(conn: &rusqlite::Connection, cfg: &Config, tz_local: bool) -> Re
     } else {
         rx + tx
     };
-    let budget = (cfg.monthly_budget_gb * 1_073_741_824.0) as i64;
+    let budget = (gb * 1_073_741_824.0) as i64;
     if budget <= 0 {
         return Ok(());
     }
+    let adv = db::period_adverb(period);
     let frac = used as f64 / budget as f64;
     let (c80, c100): (i64, i64) = conn
         .query_row("SELECT COALESCE(crossed80,0), COALESCE(crossed100,0) FROM budget_events WHERE month=?1", params![key], |r| Ok((r.get(0)?, r.get(1)?)))
         .unwrap_or((0, 0));
     if frac >= 0.8 && c80 == 0 {
         conn.execute("INSERT INTO budget_events(month,crossed80,crossed100) VALUES(?1,1,0) ON CONFLICT(month) DO UPDATE SET crossed80=1", params![key])?;
-        tracing::warn!("NetMeter: 80% of monthly budget used ({used}/{budget} bytes)");
+        tracing::warn!("NetMeter: 80% of {adv} budget used ({used}/{budget} bytes)");
     }
     if frac >= 1.0 && c100 == 0 {
         conn.execute("INSERT INTO budget_events(month,crossed80,crossed100) VALUES(?1,1,1) ON CONFLICT(month) DO UPDATE SET crossed80=1, crossed100=1", params![key])?;
-        tracing::warn!("NetMeter: 100% of monthly budget used ({used}/{budget} bytes)");
+        tracing::warn!("NetMeter: 100% of {adv} budget used ({used}/{budget} bytes)");
     }
     Ok(())
 }

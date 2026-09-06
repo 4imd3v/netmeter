@@ -29,6 +29,9 @@ fn d_max_mbit() -> u64 {
 fn d_basis() -> String {
     "total".into()
 }
+fn d_budget_period() -> String {
+    "month".into()
+}
 fn d_empty() -> Vec<String> {
     vec![]
 }
@@ -80,6 +83,10 @@ pub struct Config {
     pub max_rate_mbit: u64,
     #[serde(default)]
     pub monthly_budget_gb: f64,
+    #[serde(default = "d_budget_period")]
+    pub budget_period: String, // day | week | month
+    #[serde(default)]
+    pub budget_gb: f64,
     #[serde(default = "d_basis")]
     pub budget_basis: String, // total | wan
     #[serde(default = "d_true")]
@@ -103,6 +110,8 @@ impl Default for Config {
             retention_days_hourly: d_ret_hr(),
             max_rate_mbit: d_max_mbit(),
             monthly_budget_gb: 0.0,
+            budget_period: d_budget_period(),
+            budget_gb: 0.0,
             budget_basis: d_basis(),
             notify_on_budget: true,
             _unused: vec![],
@@ -150,6 +159,14 @@ impl Config {
                 cfg.monthly_budget_gb = n;
             }
         }
+        if let Ok(v) = std::env::var("NETMETER_BUDGET_GB") {
+            if let Ok(n) = v.parse() {
+                cfg.budget_gb = n;
+            }
+        }
+        if let Ok(v) = std::env::var("NETMETER_BUDGET_PERIOD") {
+            cfg.budget_period = v;
+        }
         cfg.poll_interval_sec = cfg.poll_interval_sec.clamp(1, 60);
         Ok(cfg)
     }
@@ -172,6 +189,21 @@ impl Config {
             return true;
         }
         self.force_lan_ifaces.iter().any(|p| glob_match(p, iface))
+    }
+
+    /// Effective budget: new (period, budget_gb) wins; legacy monthly_budget_gb falls back.
+    pub fn effective_budget(&self) -> Option<(&str, f64)> {
+        if self.budget_gb > 0.0 {
+            let p = match self.budget_period.as_str() {
+                "day" | "week" | "month" => self.budget_period.as_str(),
+                _ => "month",
+            };
+            return Some((p, self.budget_gb));
+        }
+        if self.monthly_budget_gb > 0.0 {
+            return Some(("month", self.monthly_budget_gb));
+        }
+        None
     }
 }
 

@@ -11,6 +11,8 @@ force_lan_ifaces = ["tailscale0*", "zt*"]
 retention_days_raw = 30
 retention_days_hourly = 365
 max_rate_mbit = 10000
-monthly_budget_gb = 0   # 0 = off
+monthly_budget_gb = 0   # legacy: implies month window; prefer budget_* below
+budget_period = "month" # day | week | month
+budget_gb = 0           # 0 = off; wins over monthly_budget_gb when > 0
 budget_basis = "total"  # total | wan
 notify_on_budget = true

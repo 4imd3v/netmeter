@@ -135,7 +135,7 @@ fn live_loop(
         if tick_n % 5 == 1 {
             day_tot = query_since(cfg, db::floor_day(now_ts(), tz_local));
             week_tot = query_week_total(cfg, tz_local);
-            let (used, split) = query_month(cfg, tz_local);
+            let (used, split) = query_budget(cfg, tz_local);
             month_used = used;
             month_split = split;
         }
@@ -147,11 +147,15 @@ fn live_loop(
         let sess_rx: u64 = session.values().map(|v| v.0).sum();
         let sess_tx: u64 = session.values().map(|v| v.1).sum();
 
-        let budget_frac = if cfg.monthly_budget_gb > 0.0 {
-            month_used as f64 / (cfg.monthly_budget_gb * 1_073_741_824.0)
-        } else {
-            -1.0
+        let budget_cfg = cfg.effective_budget();
+        let budget_frac = match budget_cfg {
+            Some((_, gb)) => month_used as f64 / (gb * 1_073_741_824.0),
+            None => -1.0,
         };
+        let budget_adv = budget_cfg
+            .map(|(p, _)| db::period_adverb(p))
+            .unwrap_or("monthly");
+        let budget_gb = budget_cfg.map(|(_, gb)| gb).unwrap_or(0.0);
         let (mrx, mtx, mlrx, mltx) = month_split;
         let mwan = (mrx - mlrx).max(0) + (mtx - mltx).max(0);
         let hd = hist_down.clone();
@@ -372,9 +376,9 @@ fn live_loop(
                 f.render_widget(
                     Gauge::default()
                         .block(Block::default().borders(Borders::ALL).title(format!(
-                            " month {:.1}/{:.0} GiB │ WAN {} ",
+                            " {budget_adv} {:.1}/{:.0} GiB │ WAN {} ",
                             month_used as f64 / 1_073_741_824.0,
-                            cfg.monthly_budget_gb,
+                            budget_gb,
                             fmtx::fmt_bytes(mwan, dec),
                         )))
                         .gauge_style(Style::default().fg(if pct >= 100 {
@@ -390,7 +394,7 @@ fn live_loop(
             } else {
                 f.render_widget(
                     Paragraph::new(format!(
-                        " month {} (▼{} ▲{}) │ LAN {}/{} │ WAN {}/{} │ `netmeter config set monthly_budget_gb 50` for a budget bar",
+                        " month {} (▼{} ▲{}) │ LAN {}/{} │ WAN {}/{} │ `netmeter config set budget_gb 50 budget_period month` for a budget bar",
                         fmtx::fmt_bytes(month_used, dec),
                         fmtx::fmt_bytes(mrx, dec),
                         fmtx::fmt_bytes(mtx, dec),
@@ -479,12 +483,14 @@ fn query_week_total(cfg: &Config, local: bool) -> (i64, i64) {
     .unwrap_or((0, 0))
 }
 
-/// Returns (basis_used, (rx, tx, lan_rx, lan_tx)) for current month.
-fn query_month(cfg: &Config, local: bool) -> (i64, (i64, i64, i64, i64)) {
+/// Returns (basis_used, (rx, tx, lan_rx, lan_tx)) for the budget window
+/// (day/week/month per config; legacy monthly_budget_gb implies month).
+fn query_budget(cfg: &Config, local: bool) -> (i64, (i64, i64, i64, i64)) {
     let Ok(conn) = db::open(&cfg.db_path_expanded(), true) else {
         return (0, (0, 0, 0, 0));
     };
-    let m0 = db::floor_month(now_ts(), local);
+    let period = cfg.effective_budget().map(|(p, _)| p).unwrap_or("month");
+    let m0 = db::budget_window_start(now_ts(), local, period);
     let (rx, tx, lrx, ltx): (i64, i64, i64, i64) = conn
         .query_row(
             "SELECT COALESCE(SUM(rx_total),0), COALESCE(SUM(tx_total),0), COALESCE(SUM(lan_rx),0), COALESCE(SUM(lan_tx),0) FROM samples WHERE ts>=?1",

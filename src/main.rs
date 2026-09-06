@@ -262,27 +262,36 @@ fn cmd_show(
             ),
         );
     }
-    // budget bar for month view
-    if matches!(period, Period::Month) && cfg.monthly_budget_gb > 0.0 {
-        let used: i64 = rows
-            .iter()
-            .map(|r| {
-                if cfg.budget_basis == "wan" {
-                    r.wan_rx() + r.wan_tx()
-                } else {
-                    r.total()
-                }
-            })
-            .sum();
-        let budget = (cfg.monthly_budget_gb * 1_073_741_824.0) as i64;
-        let frac = used as f64 / budget as f64;
-        println!(
-            "Budget: {}/{} {} {:.0}%",
-            fmtx::fmt_bytes(used, dec),
-            fmtx::fmt_bytes(budget, dec),
-            fmtx::bar(frac, 10),
-            frac * 100.0
-        );
+    // budget bar when the view matches the configured budget window
+    let view_period = match period {
+        Period::Day => "day",
+        Period::Week => "week",
+        Period::Month => "month",
+        Period::Hour => "hour",
+    };
+    if let Some((bperiod, bgb)) = cfg.effective_budget() {
+        if bperiod == view_period {
+            let used: i64 = rows
+                .iter()
+                .map(|r| {
+                    if cfg.budget_basis == "wan" {
+                        r.wan_rx() + r.wan_tx()
+                    } else {
+                        r.total()
+                    }
+                })
+                .sum();
+            let budget = (bgb * 1_073_741_824.0) as i64;
+            let frac = used as f64 / budget as f64;
+            println!(
+                "Budget ({}): {}/{} {} {:.0}%",
+                db::period_adverb(bperiod),
+                fmtx::fmt_bytes(used, dec),
+                fmtx::fmt_bytes(budget, dec),
+                fmtx::bar(frac, 10),
+                frac * 100.0
+            );
+        }
     }
     if rows.is_empty() {
         eprintln!(

@@ -28,11 +28,12 @@ netmeter top-proc                  # live per-process (needs sudo: CAP_NET_RAW)
 netmeter status
 netmeter export --from 2026-09-01 --to 2026-09-07 --format csv
 netmeter import --from vnstat       # one-shot vnStat history (needs `vnstat --json`)
-netmeter config get | set monthly_budget_gb 50
+netmeter config get | set budget_gb 50
+netmeter config set budget_period week   # day | week | month
 netmeter completions bash >> ~/.bashrc
 ```
 
-Budgets: set `monthly_budget_gb`, enable the user agent once per desktop user:
+Budgets: set `budget_gb` + `budget_period` (legacy `monthly_budget_gb` still works), enable the user agent once per desktop user:
 
 ```sh
 systemctl --user enable --now netmeter-agent   # after install copies the unit

@@ -246,7 +246,51 @@ pub fn floor_month(ts: i64, local: bool) -> i64 {
         .timestamp()
         .as_second()
 }
+#[allow(dead_code)]
 pub fn month_key(ts: i64, local: bool) -> String {
     let dt = zoned(ts, local).datetime();
     format!("{:04}-{:02}", dt.year(), dt.month())
+}
+/// Monday 00:00 of the week containing ts.
+pub fn floor_week(ts: i64, local: bool) -> i64 {
+    let tzone = tz(local);
+    let dt = jiff::Timestamp::from_second(ts)
+        .unwrap()
+        .to_zoned(tzone.clone())
+        .datetime();
+    let off = dt.date().weekday().to_monday_zero_offset() as i32;
+    let monday = dt.date().checked_sub(jiff::ToSpan::days(off)).unwrap();
+    jiff::civil::DateTime::new(monday.year(), monday.month(), monday.day(), 0, 0, 0, 0)
+        .unwrap()
+        .to_zoned(tzone)
+        .unwrap()
+        .timestamp()
+        .as_second()
+}
+/// Window start for a budget period ("day" | "week" | "month").
+pub fn budget_window_start(ts: i64, local: bool, period: &str) -> i64 {
+    match period {
+        "day" => floor_day(ts, local),
+        "week" => floor_week(ts, local),
+        _ => floor_month(ts, local),
+    }
+}
+/// Stable per-window key for budget_events ("day:2026-09-06", "week:2026-09-01", ...).
+pub fn budget_key(ts: i64, local: bool, period: &str) -> String {
+    let start = budget_window_start(ts, local, period);
+    let dt = zoned(start, local).datetime();
+    format!(
+        "{period}:{:04}-{:02}-{:02}",
+        dt.year(),
+        dt.month(),
+        dt.day()
+    )
+}
+/// day → daily, week → weekly, month → monthly.
+pub fn period_adverb(period: &str) -> &'static str {
+    match period {
+        "day" => "daily",
+        "week" => "weekly",
+        _ => "monthly",
+    }
 }

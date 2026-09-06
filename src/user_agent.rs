@@ -1,7 +1,7 @@
 use crate::{config::Config, db};
 use anyhow::Result;
 
-/// User-session agent: polls budget_events + month usage, notifies once per threshold.
+/// User-session agent: polls budget_events for the configured window, notifies once per threshold.
 /// Designed to run as systemd --user unit; safe headless no-op.
 pub fn run(cfg: Config, once: bool) -> Result<()> {
     loop {
@@ -15,7 +15,10 @@ pub fn run(cfg: Config, once: bool) -> Result<()> {
 }
 
 fn check_once(cfg: &Config) -> Result<()> {
-    if !cfg.notify_on_budget || cfg.monthly_budget_gb <= 0.0 {
+    let Some((period, _)) = cfg.effective_budget() else {
+        return Ok(());
+    };
+    if !cfg.notify_on_budget {
         return Ok(());
     }
     if std::env::var("DBUS_SESSION_BUS_ADDRESS").is_err() && !cfg_path_has_display() {
@@ -27,7 +30,8 @@ fn check_once(cfg: &Config) -> Result<()> {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let tz_local = cfg.timezone != "utc";
-    let key = db::month_key(now, tz_local);
+    let key = db::budget_key(now, tz_local, period);
+    let adv = db::period_adverb(period);
     let (c80, c100): (i64, i64) = conn
         .query_row(
             "SELECT COALESCE(crossed80,0), COALESCE(crossed100,0) FROM budget_events WHERE month=?1",
@@ -39,11 +43,11 @@ fn check_once(cfg: &Config) -> Result<()> {
     let sent80 = sentinel(&key, 80);
     let sent100 = sentinel(&key, 100);
     if c80 == 1 && !sent80 {
-        notify(&format!("NetMeter: 80% of {key} budget used"));
+        notify(&format!("NetMeter: 80% of {adv} budget used ({key})"));
         mark_sent(&key, 80);
     }
     if c100 == 1 && !sent100 {
-        notify(&format!("NetMeter: 100% of {key} budget used"));
+        notify(&format!("NetMeter: 100% of {adv} budget used ({key})"));
         mark_sent(&key, 100);
     }
     Ok(())

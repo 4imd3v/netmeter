@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{BarChart, Block, Borders, Gauge, Paragraph, Row, Table},
+    widgets::{Block, Borders, Gauge, Paragraph, Row, Sparkline, Table},
 };
 use std::time::{Duration, Instant};
 
@@ -22,13 +22,6 @@ struct IfRow {
     session_tx: u64,
 }
 
-/// One bar-bucket series of history.
-struct Hist {
-    labels: Vec<String>,
-    down: Vec<u64>,
-    up: Vec<u64>,
-}
-
 fn live_loop(
     terminal: &mut ratatui::DefaultTerminal,
     cfg: &Config,
@@ -39,6 +32,9 @@ fn live_loop(
     let tz_local = cfg.timezone != "utc";
     let started = Instant::now();
 
+    // network-speed histories (B/s per tick, 120 samples)
+    let mut hist_down: Vec<u64> = vec![0; 120];
+    let mut hist_up: Vec<u64> = vec![0; 120];
     let mut prev = capture::read_proc().unwrap_or_default();
     let mut prev_lan = capture::read_nft();
     let mut lan_rate = String::from("…");
@@ -46,18 +42,9 @@ fn live_loop(
     let mut tick_n: u64 = 0;
     // cached slow queries
     let mut day_tot = (0i64, 0i64);
+    let mut week_tot = (0i64, 0i64);
     let mut month_used: i64 = 0;
     let mut month_split = (0i64, 0i64, 0i64, 0i64); // rx, tx, lan_rx, lan_tx
-    let mut h_day = Hist {
-        labels: vec![],
-        down: vec![],
-        up: vec![],
-    };
-    let mut h_month = Hist {
-        labels: vec![],
-        down: vec![],
-        up: vec![],
-    };
 
     loop {
         std::thread::sleep(Duration::from_millis(interval_ms));
@@ -122,17 +109,20 @@ fn live_loop(
 
         let tot_down: u64 = rows.iter().map(|r| r.down).sum();
         let tot_up: u64 = rows.iter().map(|r| r.up).sum();
+        hist_down.push(tot_down);
+        hist_up.push(tot_up);
+        if hist_down.len() > 120 {
+            hist_down.remove(0);
+            hist_up.remove(0);
+        }
         let max_row = rows.iter().map(|r| r.down + r.up).max().unwrap_or(1);
 
         if tick_n % 5 == 1 {
-            day_tot = query_day_total(cfg, tz_local);
+            day_tot = query_since(cfg, db::floor_day(now_ts(), tz_local));
+            week_tot = query_week_total(cfg, tz_local);
             let (used, split) = query_month(cfg, tz_local);
             month_used = used;
             month_split = split;
-        }
-        if tick_n % 15 == 1 {
-            h_day = load_history(cfg, tz_local, 24, false, iface_filter.as_deref());
-            h_month = load_history(cfg, tz_local, 30, true, iface_filter.as_deref());
         }
         let uptime = started.elapsed().as_secs();
         let sess_rx: u64 = session.values().map(|v| v.0).sum();
@@ -145,15 +135,17 @@ fn live_loop(
         };
         let (mrx, mtx, mlrx, mltx) = month_split;
         let mwan = (mrx - mlrx).max(0) + (mtx - mltx).max(0);
+        let hd = hist_down.clone();
+        let hu = hist_up.clone();
 
         terminal.draw(|f| {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Length(3), // stats header
-                    Constraint::Min(6),    // interfaces table
-                    Constraint::Length(8), // 24h | 30d bars
-                    Constraint::Length(3), // budget gauge / month strip
+                    Constraint::Min(8),    // interfaces | usage
+                    Constraint::Length(7), // network speed sparks
+                    Constraint::Length(3), // budget / month strip
                     Constraint::Length(1), // keys
                 ])
                 .split(f.area());
@@ -196,7 +188,12 @@ fn live_loop(
                 chunks[0],
             );
 
-            // ---- interfaces table ----
+            // ---- middle: interfaces (left) | usage day/week/month (right) ----
+            let mid = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+                .split(chunks[1]);
+
             let table_rows: Vec<Row> = rows
                 .iter()
                 .map(|r| {
@@ -230,27 +227,64 @@ fn live_loop(
                     rows.len(),
                     uptime
                 ))),
-                chunks[1],
+                mid[0],
             );
 
-            // ---- history bars side by side ----
-            let hist = Layout::default()
+            let usage_rows = vec![
+                usage_row("TODAY", day_tot, dec),
+                usage_row("WEEK", week_tot, dec),
+                usage_row(
+                    "MONTH",
+                    (month_split.0, month_split.1),
+                    dec,
+                ),
+            ];
+            f.render_widget(
+                Table::new(
+                    usage_rows,
+                    [
+                        Constraint::Length(7),
+                        Constraint::Percentage(30),
+                        Constraint::Percentage(30),
+                        Constraint::Percentage(30),
+                    ],
+                )
+                .header(
+                    Row::new(vec!["", "DOWN", "UP", "TOTAL"])
+                        .style(Style::default().fg(Color::Yellow)),
+                )
+                .block(Block::default().borders(Borders::ALL).title(" usage ")),
+                mid[1],
+            );
+
+            // ---- network speed ----
+            let speeds = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(chunks[2]);
-            render_bars(
-                f,
-                hist[0],
-                &format!(" 24h {} ", fmtx::fmt_bytes(sum(&h_day) as i64, dec)),
-                &h_day,
-                Color::Green,
+            f.render_widget(
+                Sparkline::default()
+                    .block(
+                        Block::default().borders(Borders::ALL).title(format!(
+                            " ▼ speed {} ",
+                            fmt_rate(tot_down, 1.0, dec)
+                        )),
+                    )
+                    .data(&hd)
+                    .style(Style::default().fg(Color::Green)),
+                speeds[0],
             );
-            render_bars(
-                f,
-                hist[1],
-                &format!(" 30d {} ", fmtx::fmt_bytes(sum(&h_month) as i64, dec)),
-                &h_month,
-                Color::Blue,
+            f.render_widget(
+                Sparkline::default()
+                    .block(
+                        Block::default().borders(Borders::ALL).title(format!(
+                            " ▲ speed {} ",
+                            fmt_rate(tot_up, 1.0, dec)
+                        )),
+                    )
+                    .data(&hu)
+                    .style(Style::default().fg(Color::Blue)),
+                speeds[1],
             );
 
             // ---- month / budget strip ----
@@ -277,7 +311,7 @@ fn live_loop(
             } else {
                 f.render_widget(
                     Paragraph::new(format!(
-                        " month {} (▼{} ▲{}) │ LAN {}/{} │ WAN {}/{} │ set a budget: `netmeter config set monthly_budget_gb 50`",
+                        " month {} (▼{} ▲{}) │ LAN {}/{} │ WAN {}/{} │ `netmeter config set monthly_budget_gb 50` for a budget bar",
                         fmtx::fmt_bytes(month_used, dec),
                         fmtx::fmt_bytes(mrx, dec),
                         fmtx::fmt_bytes(mtx, dec),
@@ -301,49 +335,13 @@ fn live_loop(
     Ok(())
 }
 
-fn sum(h: &Hist) -> u64 {
-    h.down.iter().sum::<u64>() + h.up.iter().sum::<u64>()
-}
-
-fn render_bars(
-    f: &mut ratatui::Frame,
-    area: ratatui::layout::Rect,
-    title: &str,
-    h: &Hist,
-    color: Color,
-) {
-    if h.labels.is_empty() {
-        f.render_widget(
-            Paragraph::new("…collecting")
-                .block(Block::default().borders(Borders::ALL).title(title)),
-            area,
-        );
-        return;
-    }
-    let data: Vec<(&str, u64)> = h
-        .labels
-        .iter()
-        .zip(h.down.iter().zip(h.up.iter()))
-        .map(|(l, (d, u))| (l.as_str(), d + u))
-        .collect();
-    let n = data.len();
-    let (bw, gap) = if n > 40 {
-        (1, 0)
-    } else if n > 24 {
-        (2, 0)
-    } else {
-        (3, 1)
-    };
-    f.render_widget(
-        BarChart::default()
-            .block(Block::default().borders(Borders::ALL).title(title))
-            .data(&data)
-            .bar_width(bw)
-            .bar_gap(gap)
-            .bar_style(Style::default().fg(color))
-            .value_style(Style::default().fg(Color::Black).bg(color)),
-        area,
-    );
+fn usage_row(label: &str, dt: (i64, i64), dec: bool) -> Row<'static> {
+    Row::new(vec![
+        label.to_string(),
+        fmtx::fmt_bytes(dt.0, dec),
+        fmtx::fmt_bytes(dt.1, dec),
+        fmtx::fmt_bytes(dt.0 + dt.1, dec),
+    ])
 }
 
 // ---------- queries ----------
@@ -359,88 +357,44 @@ fn now_ts() -> i64 {
         .unwrap_or(0)
 }
 
-/// Load last N buckets (hours or days) — rollup table first, raw samples fallback.
-fn load_history(cfg: &Config, local: bool, n: usize, daily: bool, iface: Option<&str>) -> Hist {
-    let now = now_ts();
-    let empty = Hist {
-        labels: vec![],
-        down: vec![],
-        up: vec![],
-    };
-    let Ok(conn) = db::open(&cfg.db_path_expanded(), true) else {
-        return empty;
-    };
-    let (table, span, floor): (&str, i64, fn(i64, bool) -> i64) = if daily {
-        ("daily", n as i64 * 86400, db::floor_day)
-    } else {
-        ("hourly", n as i64 * 3600, db::floor_hour)
-    };
-    let fetched: Vec<db::Row> =
-        db::query_range(&conn, table, now - span, now + 1, iface).unwrap_or_default();
-    let mut rows: Vec<db::Row> = fetched;
-    if rows.is_empty() {
-        // fallback: bucket raw 5s samples (daemon rolls up hourly)
-        let s = db::query_range(&conn, "samples", now - span, now + 1, iface).unwrap_or_default();
-        use std::collections::BTreeMap;
-        let mut m: BTreeMap<i64, (i64, i64)> = BTreeMap::new();
-        for r in s {
-            let b = floor(r.ts, local);
-            let e = m.entry(b).or_insert((0, 0));
-            e.0 += r.rx;
-            e.1 += r.tx;
-        }
-        rows = m
-            .into_iter()
-            .map(|(ts, (rx, tx))| db::Row {
-                ts,
-                iface: "_all".into(),
-                rx,
-                tx,
-                lan_rx: 0,
-                lan_tx: 0,
-            })
-            .collect();
-    }
-    rows.sort_by_key(|r| r.ts);
-    if rows.len() > n {
-        rows = rows.split_off(rows.len() - n);
-    }
-    let mut h = Hist {
-        labels: vec![],
-        down: vec![],
-        up: vec![],
-    };
-    for r in rows {
-        let dt = if local {
-            jiff::Timestamp::from_second(r.ts)
-                .unwrap()
-                .to_zoned(jiff::tz::TimeZone::system())
-                .datetime()
-        } else {
-            jiff::Timestamp::from_second(r.ts)
-                .unwrap()
-                .to_zoned(jiff::tz::TimeZone::UTC)
-                .datetime()
-        };
-        h.labels.push(if daily {
-            format!("{:02}", dt.day())
-        } else {
-            format!("{:02}", dt.hour())
-        });
-        h.down.push(r.rx.max(0) as u64);
-        h.up.push(r.tx.max(0) as u64);
-    }
-    h
-}
-
-fn query_day_total(cfg: &Config, local: bool) -> (i64, i64) {
+fn query_since(cfg: &Config, from: i64) -> (i64, i64) {
     let Ok(conn) = db::open(&cfg.db_path_expanded(), true) else {
         return (0, 0);
     };
-    let d0 = db::floor_day(now_ts(), local);
     conn.query_row(
         "SELECT COALESCE(SUM(rx_total),0), COALESCE(SUM(tx_total),0) FROM samples WHERE ts>=?1",
-        rusqlite::params![d0],
+        rusqlite::params![from],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .unwrap_or((0, 0))
+}
+
+/// Monday-00:00 → now (local or UTC week).
+fn query_week_total(cfg: &Config, local: bool) -> (i64, i64) {
+    let Ok(conn) = db::open(&cfg.db_path_expanded(), true) else {
+        return (0, 0);
+    };
+    let now = now_ts();
+    let tzone = if local {
+        jiff::tz::TimeZone::system()
+    } else {
+        jiff::tz::TimeZone::UTC
+    };
+    let dt = jiff::Timestamp::from_second(now)
+        .unwrap()
+        .to_zoned(tzone.clone())
+        .datetime();
+    let off = dt.date().weekday().to_monday_zero_offset() as i32;
+    let monday = dt.date().checked_sub(jiff::ToSpan::days(off)).unwrap();
+    let m0 = jiff::civil::DateTime::new(monday.year(), monday.month(), monday.day(), 0, 0, 0, 0)
+        .unwrap()
+        .to_zoned(tzone)
+        .unwrap()
+        .timestamp()
+        .as_second();
+    conn.query_row(
+        "SELECT COALESCE(SUM(rx_total),0), COALESCE(SUM(tx_total),0) FROM samples WHERE ts>=?1",
+        rusqlite::params![m0],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )
     .unwrap_or((0, 0))

@@ -88,6 +88,8 @@ enum Cmd {
     },
     /// Shell completions
     Completions { shell: clap_complete::Shell },
+    /// Print roff man page to stdout (packaging embeds it)
+    Manpage,
     /// Background daemon controls
     Daemon {
         #[command(subcommand)]
@@ -143,6 +145,13 @@ fn main() -> Result<()> {
             use clap::CommandFactory;
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "netmeter", &mut std::io::stdout());
+            Ok(())
+        }
+        Cmd::Manpage => {
+            use clap::CommandFactory;
+            let cmd = Cli::command();
+            let man = clap_mangen::Man::new(cmd);
+            man.render(&mut std::io::stdout())?;
             Ok(())
         }
         Cmd::Daemon { op } => cmd_daemon(cfg, op),

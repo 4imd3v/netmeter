@@ -1,0 +1,29 @@
+# Maintainer: NetMeter contributors
+pkgname=netmeter
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Local-first LAN/WAN/TOTAL bandwidth meter for Linux (terminal)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/example/netmeter"
+license=('MIT')
+depends=('systemd')
+optdepends=('nftables: LAN/WAN split accounting'
+            'libnotify: desktop budget notifications')
+makedepends=('cargo')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  cargo build --release --locked
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
+  install -Dm644 "packaging/netmeter.service" "$pkgdir/usr/lib/systemd/system/netmeter.service"
+  install -Dm644 "packaging/netmeter-agent.service" "$pkgdir/usr/share/netmeter/user/netmeter-agent.service"
+  install -Dm644 "packaging/config.toml.example" "$pkgdir/etc/netmeter/config.toml"
+  install -Dm644 "man/netmeter.1" "$pkgdir/usr/share/man/man1/netmeter.1"
+  install -Dm644 "LICENSE-MIT" "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
+}

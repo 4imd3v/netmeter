@@ -51,7 +51,22 @@ from `/proc/net/dev`, LAN from nft, `WAN = TOTAL − LAN`. No nft/perms
 - `src/capture.rs` — `/proc/net/dev` + `nft --json` readers, ruleset renderer
 - `src/db.rs` — rusqlite/WAL, rollups, local-time buckets
 - `src/live.rs` — ratatui dashboard · `src/user_agent.rs` — session notifier
-- `packaging/` — systemd units + example config · `.cargo/config.toml` — musl static
+- `packaging/` — systemd units, deb/rpm/AUR scripts, example config · `man/` — generated man page
+
+## Packages (deb/rpm/AUR/man)
+
+```sh
+./target/debug/netmeter manpage > man/netmeter.1  # regenerate after CLI changes
+cargo install cargo-deb && cargo deb               # → target/debian/*.deb
+cargo install cargo-generate-rpm && cargo generate-rpm  # needs rpmbuild
+```
+
+- deb: binary + both systemd units + `/etc/netmeter/config.toml` (conffile) +
+  man page; postinst creates the `netmeter` user. Depends: systemd.
+  Recommends: nftables (LAN/WAN split), libnotify-bin (fallback notify).
+- AUR: `packaging/aur/PKGBUILD` (+ `.install` hook). Point `url=` at your repo.
+- User-agent unit ships at `/usr/share/netmeter/user/`; enable per desktop user
+  (copy/link into `~/.config/systemd/user/` first if needed).
 
 ## Release (musl static + deb/rpm)
 

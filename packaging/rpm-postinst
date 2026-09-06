@@ -1,0 +1,11 @@
+#!/bin/sh
+# rpm %post: create user, reload systemd.
+set -e
+if ! id netmeter >/dev/null 2>&1; then
+  useradd -r -s /usr/sbin/nologin -d /var/lib/netmeter netmeter
+fi
+mkdir -p /var/lib/netmeter
+chown netmeter:netmeter /var/lib/netmeter
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload || true
+fi

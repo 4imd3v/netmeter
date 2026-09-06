@@ -1,0 +1,55 @@
+.ie \n(.g .ds Aq \(aq
+.el .ds Aq '
+.TH netmeter 1  "netmeter 0.2.0" 
+.SH NAME
+netmeter \- Local\-first LAN/WAN/TOTAL bandwidth meter (Linux)
+.SH SYNOPSIS
+\fBnetmeter\fR [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] <\fIsubcommands\fR>
+.SH DESCRIPTION
+Local\-first LAN/WAN/TOTAL bandwidth meter (Linux)
+.SH OPTIONS
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Print help
+.TP
+\fB\-V\fR, \fB\-\-version\fR
+Print version
+.SH SUBCOMMANDS
+.TP
+netmeter\-live(1)
+Live 1s dashboard (q to quit)
+.TP
+netmeter\-show(1)
+Show historical usage
+.TP
+netmeter\-top(1)
+Top talkers by iface or day
+.TP
+netmeter\-status(1)
+Daemon + system status
+.TP
+netmeter\-config(1)
+Config get/set/path/reset
+.TP
+netmeter\-export(1)
+Export range to csv/json
+.TP
+netmeter\-import(1)
+One\-shot vnStat history import (vnstat \-\-json)
+.TP
+netmeter\-completions(1)
+Shell completions
+.TP
+netmeter\-manpage(1)
+Print roff man page to stdout (packaging embeds it)
+.TP
+netmeter\-daemon(1)
+Background daemon controls
+.TP
+netmeter\-user\-agent(1)
+Per\-user budget notifier (runs as systemd \-\-user unit)
+.TP
+netmeter\-help(1)
+Print this message or the help of the given subcommand(s)
+.SH VERSION
+v0.2.0

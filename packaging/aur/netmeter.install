@@ -1,0 +1,11 @@
+post_install() {
+  id netmeter >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -d /var/lib/netmeter netmeter
+  install -dm755 -o netmeter -g netmeter /var/lib/netmeter
+  systemctl daemon-reload
+  echo "Start with: sudo systemctl enable --now netmeter.service"
+  echo "Then per user: systemctl --user enable --now netmeter-agent (unit ships at /usr/share/netmeter/user/)"
+}
+
+post_remove() {
+  systemctl daemon-reload
+}

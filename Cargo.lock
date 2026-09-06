@@ -1265,6 +1265,7 @@ dependencies = [
  "crossterm",
  "directories",
  "jiff",
+ "libc",
  "notify-rust",
  "pnet",
  "ratatui",

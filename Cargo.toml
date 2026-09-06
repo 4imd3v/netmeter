@@ -25,6 +25,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 directories = "6"
 jiff = { version = "0.2", features = ["std"] }
 anyhow = "1"
+libc = "0.2"
 pnet = { version = "0.35", default-features = false, features = ["std"] }
 
 [profile.release]

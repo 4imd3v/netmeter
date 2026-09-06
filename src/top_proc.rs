@@ -51,12 +51,16 @@ pub struct ProcSampler {
     prev: Cum,
 }
 
-/// pid, comm, rx B/s, tx B/s since last [`rates`](ProcSampler::rates) call.
+/// pid, comm, per-tick rx/tx plus cumulative session totals.
 pub struct ProcRate {
     pub pid: u32,
     pub comm: String,
+    #[allow(dead_code)]
     pub rx: u64,
+    #[allow(dead_code)]
     pub tx: u64,
+    pub total_rx: u64,
+    pub total_tx: u64,
 }
 
 impl ProcSampler {
@@ -123,7 +127,8 @@ impl ProcSampler {
         true
     }
 
-    /// Per-process B/s since last call, sorted desc. First call primes baselines.
+    /// Per-process usage since last call, sorted desc by session total.
+    /// First call primes baselines.
     pub fn rates(&mut self) -> Vec<ProcRate> {
         let mut out = vec![];
         for (pid, (comm, rx_b, tx_b)) in &self.cum {
@@ -137,11 +142,20 @@ impl ProcSampler {
                 comm: comm.clone(),
                 rx: rx_b.saturating_sub(prx),
                 tx: tx_b.saturating_sub(ptx),
+                total_rx: *rx_b,
+                total_tx: *tx_b,
             });
         }
         self.prev = self.cum.clone();
-        out.sort_by_key(|r| std::cmp::Reverse(r.rx + r.tx));
+        out.sort_by_key(|r| std::cmp::Reverse(r.total_rx + r.total_tx));
         out
+    }
+
+    /// Cumulative session totals (rx, tx) across all processes.
+    pub fn session_totals(&self) -> (u64, u64) {
+        self.cum
+            .values()
+            .fold((0, 0), |(a, b), (_, rx, tx)| (a + rx, b + tx))
     }
 }
 
@@ -369,9 +383,8 @@ fn view_loop(
         rates = sampler.rates();
         rates.truncate(25);
 
-        let tot_rx: u64 = rates.iter().map(|r| r.rx).sum();
-        let tot_tx: u64 = rates.iter().map(|r| r.tx).sum();
-        let max_r = rates.first().map(|r| r.rx + r.tx).unwrap_or(1);
+        let (tot_rx, tot_tx) = sampler.session_totals();
+        let max_r = rates.first().map(|r| r.total_rx + r.total_tx).unwrap_or(1);
         let up_s = started.elapsed().as_secs();
 
         term.draw(|f| {
@@ -391,15 +404,15 @@ fn view_loop(
                             .fg(Color::Green)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::raw(format!("{}/s ", fmtx::fmt_bytes(tot_rx as i64, dec))),
+                    Span::raw(format!("{} ", fmtx::fmt_bytes(tot_rx as i64, dec))),
                     Span::styled(
                         " ▲ ",
                         Style::default()
                             .fg(Color::Blue)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::raw(format!("{}/s ", fmtx::fmt_bytes(tot_tx as i64, dec))),
-                    Span::styled("│ sorting by rate ", Style::default().fg(Color::Yellow)),
+                    Span::raw(format!("{} ", fmtx::fmt_bytes(tot_tx as i64, dec))),
+                    Span::styled("│ session usage ", Style::default().fg(Color::Yellow)),
                     Span::raw(format!("│ up {up_s}s ")),
                 ]))
                 .block(
@@ -412,7 +425,8 @@ fn view_loop(
             let body: Vec<Row> = rates
                 .iter()
                 .map(|r| {
-                    let share = ((r.rx + r.tx) as f64 / max_r as f64 * 10.0).round() as usize;
+                    let share =
+                        ((r.total_rx + r.total_tx) as f64 / max_r as f64 * 10.0).round() as usize;
                     let name = if r.pid == 0 {
                         r.comm.clone()
                     } else {
@@ -420,9 +434,9 @@ fn view_loop(
                     };
                     Row::new(vec![
                         name,
-                        format!("{}/s", fmtx::fmt_bytes(r.rx as i64, dec)),
-                        format!("{}/s", fmtx::fmt_bytes(r.tx as i64, dec)),
-                        format!("{}/s", fmtx::fmt_bytes((r.rx + r.tx) as i64, dec)),
+                        fmtx::fmt_bytes(r.total_rx as i64, dec),
+                        fmtx::fmt_bytes(r.total_tx as i64, dec),
+                        fmtx::fmt_bytes((r.total_rx + r.total_tx) as i64, dec),
                         fmtx::bar(share as f64 / 10.0, 10),
                     ])
                 })
@@ -439,7 +453,7 @@ fn view_loop(
                     ],
                 )
                 .header(
-                    Row::new(vec!["PROCESS", "DOWN/s", "UP/s", "TOTAL/s", "SHARE"])
+                    Row::new(vec!["PROCESS", "DOWN", "UP", "TOTAL", "SHARE"])
                         .style(Style::default().fg(Color::Yellow)),
                 )
                 .block(

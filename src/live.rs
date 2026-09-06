@@ -301,8 +301,8 @@ fn live_loop(
                         };
                         Row::new(vec![
                             name,
-                            format!("{}/s", fmtx::fmt_bytes(r.rx as i64, dec)),
-                            format!("{}/s", fmtx::fmt_bytes(r.tx as i64, dec)),
+                            fmtx::fmt_bytes(r.total_rx as i64, dec),
+                            fmtx::fmt_bytes(r.total_tx as i64, dec),
                         ])
                     })
                     .collect();
@@ -316,7 +316,7 @@ fn live_loop(
                         ],
                     )
                     .header(
-                        Row::new(vec!["APP", "DOWN/s", "UP/s"])
+                        Row::new(vec!["APP", "DOWN", "UP"])
                             .style(Style::default().fg(Color::Yellow)),
                     )
                     .block(

@@ -197,7 +197,7 @@ notify_on_budget = true
 ## 12. Roadmap (no build yet)
 
 - M1 MVP (ship): §§5–11 Linux, systemd system+user units, nft split (TOTAL-only fallback), show+live+top+status+config+export+import+completions, budgets+user-agent notify, man pages.
-- M2 (deferred, Q3 LOCKED): opt-in `top-proc`: Aya eBPF `cgroup_skb`/TC per-PID byte hooks + Identity (exe+cgroup, not PID) + tiered rollups; needs nightly `bpfel-unknown-none`, `bpf-linker`, BTF kernel; fallback `/proc` scanner documented as 90%-accurate best-effort. Plus TUI graphs, `install --user` TOTAL-only mode.
+- M2 (partly SHIPPED v0.2.0): `top-proc` live per-process view via AF_PACKET capture + `/proc` inode→PID attribution (nethogs/bandwhich method, best-effort: short flows → `unknown`, needs `sudo` for CAP_NET_RAW + full fd visibility). UPGRADE PATH: Aya eBPF `cgroup_skb`/TC hooks + Identity keying + persisted rollups (needs nightly, `bpf-linker`, BTF kernel — deferred until requested). Remaining: TUI graphs (SHIPPED: history bars in `live`), `install --user` TOTAL-only mode.
 - M3: cross-OS TOTAL-only (no split documented), Prometheus endpoint (vnStat `vnstat-metrics.cgi` precedent).
 
 ## 13. Security & privacy

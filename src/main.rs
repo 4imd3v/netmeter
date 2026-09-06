@@ -4,6 +4,7 @@ mod daemon;
 mod db;
 mod fmtx;
 mod live;
+mod top_proc;
 mod user_agent;
 
 use anyhow::{Context, Result};
@@ -95,6 +96,11 @@ enum Cmd {
         #[command(subcommand)]
         op: DaemonOp,
     },
+    /// Live per-process bandwidth (needs CAP_NET_RAW: run with sudo)
+    TopProc {
+        #[arg(long)]
+        iface: Option<String>,
+    },
     /// Per-user budget notifier (runs as systemd --user unit)
     UserAgent {
         #[arg(long)]
@@ -155,6 +161,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Cmd::Daemon { op } => cmd_daemon(cfg, op),
+        Cmd::TopProc { iface } => top_proc::run(cfg, iface),
         Cmd::UserAgent { once } => user_agent::run(cfg, once),
     }
 }

@@ -7,7 +7,7 @@ use ratatui::{
 };
 use std::time::{Duration, Instant};
 
-use crate::{capture, config::Config, db, fmtx};
+use crate::{capture, config::Config, db, fmtx, top_proc::ProcSampler};
 
 pub fn run(cfg: Config, iface_filter: Option<String>) -> Result<()> {
     ratatui::run(|terminal| live_loop(terminal, &cfg, iface_filter.clone()))?;
@@ -45,6 +45,9 @@ fn live_loop(
     let mut week_tot = (0i64, 0i64);
     let mut month_used: i64 = 0;
     let mut month_split = (0i64, 0i64, 0i64, 0i64); // rx, tx, lan_rx, lan_tx
+                                                    // top-apps sampler shares the iface filter; None when unpermitted (no CAP_NET_RAW)
+    let mut sampler = ProcSampler::start(iface_filter.clone()).ok();
+    let mut app_rates: Vec<crate::top_proc::ProcRate> = vec![];
 
     loop {
         std::thread::sleep(Duration::from_millis(interval_ms));
@@ -124,6 +127,14 @@ fn live_loop(
             month_used = used;
             month_split = split;
         }
+        if let Some(sm) = sampler.as_mut() {
+            if sm.poll() {
+                app_rates = sm.rates();
+                app_rates.truncate(12);
+            } else {
+                sampler = None; // channel died; fall back to hint panel
+            }
+        }
         let uptime = started.elapsed().as_secs();
         let sess_rx: u64 = session.values().map(|v| v.0).sum();
         let sess_tx: u64 = session.values().map(|v| v.1).sum();
@@ -188,11 +199,15 @@ fn live_loop(
                 chunks[0],
             );
 
-            // ---- middle: interfaces (left) | usage day/week/month (right) ----
+            // ---- middle: left stacks interfaces+usage, right top apps ----
             let mid = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
                 .split(chunks[1]);
+            let left = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(4), Constraint::Length(5)])
+                .split(mid[0]);
 
             let table_rows: Vec<Row> = rows
                 .iter()
@@ -227,7 +242,7 @@ fn live_loop(
                     rows.len(),
                     uptime
                 ))),
-                mid[0],
+                left[0],
             );
 
             let usage_rows = vec![
@@ -254,8 +269,55 @@ fn live_loop(
                         .style(Style::default().fg(Color::Yellow)),
                 )
                 .block(Block::default().borders(Borders::ALL).title(" usage ")),
-                mid[1],
+                left[1],
             );
+
+            // ---- top apps (right column) ----
+            if sampler.is_some() {
+                let app_rows: Vec<Row> = app_rates
+                    .iter()
+                    .map(|r| {
+                        let name = if r.pid == 0 {
+                            r.comm.clone()
+                        } else {
+                            format!("{} [{}]", r.comm, r.pid)
+                        };
+                        Row::new(vec![
+                            name,
+                            format!("{}/s", fmtx::fmt_bytes(r.rx as i64, dec)),
+                            format!("{}/s", fmtx::fmt_bytes(r.tx as i64, dec)),
+                        ])
+                    })
+                    .collect();
+                f.render_widget(
+                    Table::new(
+                        app_rows,
+                        [
+                            Constraint::Percentage(48),
+                            Constraint::Percentage(26),
+                            Constraint::Percentage(26),
+                        ],
+                    )
+                    .header(
+                        Row::new(vec!["APP", "DOWN/s", "UP/s"])
+                            .style(Style::default().fg(Color::Yellow)),
+                    )
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(" top apps "),
+                    ),
+                    mid[1],
+                );
+            } else {
+                f.render_widget(
+                    Paragraph::new(
+                        "top apps need packet capture\nrun `sudo netmeter live`\nor `sudo netmeter top-proc` standalone",
+                    )
+                    .block(Block::default().borders(Borders::ALL).title(" top apps ")),
+                    mid[1],
+                );
+            }
 
             // ---- network speed ----
             let speeds = Layout::default()

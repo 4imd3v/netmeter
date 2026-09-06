@@ -24,6 +24,7 @@ netmeter live                      # 1s dashboard, q to quit
 netmeter show --period day         # hour|day|week|month
 netmeter show --period month --json
 netmeter top --by iface            # or --by day
+netmeter top-proc                  # live per-process (needs sudo: CAP_NET_RAW)
 netmeter status
 netmeter export --from 2026-09-01 --to 2026-09-07 --format csv
 netmeter import --from vnstat       # one-shot vnStat history (needs `vnstat --json`)

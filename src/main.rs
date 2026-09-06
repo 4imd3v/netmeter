@@ -417,14 +417,29 @@ fn cmd_status(cfg: Config, as_json: bool) -> Result<()> {
     let wal_size = std::fs::metadata(format!("{}.wal", db_path.display()))
         .map(|m| m.len())
         .unwrap_or(0);
-    let nft_ok = capture::nft_table_exists();
+    let nft_direct = capture::nft_table_exists();
+    let db_conn = db::open(&db_path, true).ok();
+    // Unprivileged users can't query nft directly; daemon (CAP_NET_ADMIN) can.
+    // Fall back to evidence in DB: any LAN bytes ever recorded means split works.
+    let lan_seen: i64 = db_conn
+        .as_ref()
+        .and_then(|c| {
+            c.query_row(
+                "SELECT COALESCE(SUM(lan_rx)+SUM(lan_tx),0) FROM samples",
+                [],
+                |r| r.get(0),
+            )
+            .ok()
+        })
+        .unwrap_or(0);
+    let nft_ok = nft_direct || lan_seen > 0;
     let daemon_alive = std::process::Command::new("systemctl")
         .args(["is-active", "--quiet", "netmeter.service"])
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
-    let discarded: String = db::open(&db_path, true)
-        .ok()
+    let discarded: String = db_conn
+        .as_ref()
         .and_then(|c| {
             c.query_row("SELECT v FROM meta WHERE k='discarded_samples'", [], |r| {
                 r.get(0)

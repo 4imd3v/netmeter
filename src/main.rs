@@ -4,6 +4,7 @@ mod daemon;
 mod db;
 mod fmtx;
 mod live;
+mod proc_cap;
 mod top_proc;
 mod user_agent;
 
@@ -96,10 +97,19 @@ enum Cmd {
         #[command(subcommand)]
         op: DaemonOp,
     },
-    /// Live per-process bandwidth (needs CAP_NET_RAW: run with sudo)
-    TopProc {
+    /// Per-app usage history from daemon recording (day|week|month)
+    TopApps {
+        #[arg(long, value_enum, default_value = "day")]
+        period: ProcPeriod,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
         #[arg(long)]
-        iface: Option<String>,
+        json: bool,
+    },
+    /// Per-app usage dashboard, auto-refreshing (daemon-recorded, no sudo needed)
+    TopProc {
+        #[arg(long, value_enum, default_value = "day")]
+        period: ProcPeriod,
     },
     /// Per-user budget notifier (runs as systemd --user unit)
     UserAgent {
@@ -114,6 +124,13 @@ enum ConfigOp {
     Set { key: String, value: String },
     Path,
     Reset,
+}
+
+#[derive(Debug, Clone, ValueEnum)]
+enum ProcPeriod {
+    Day,
+    Week,
+    Month,
 }
 
 #[derive(Subcommand, Debug)]
@@ -161,7 +178,19 @@ fn main() -> Result<()> {
             Ok(())
         }
         Cmd::Daemon { op } => cmd_daemon(cfg, op),
-        Cmd::TopProc { iface } => top_proc::run(cfg, iface),
+        Cmd::TopApps {
+            period,
+            limit,
+            json,
+        } => cmd_top_apps(cfg, period, limit, json),
+        Cmd::TopProc { period } => top_proc::run(
+            cfg,
+            match period {
+                ProcPeriod::Day => top_proc::PPeriodArg::Day,
+                ProcPeriod::Week => top_proc::PPeriodArg::Week,
+                ProcPeriod::Month => top_proc::PPeriodArg::Month,
+            },
+        ),
         Cmd::UserAgent { once } => user_agent::run(cfg, once),
     }
 }
@@ -435,6 +464,66 @@ fn cmd_top(cfg: Config, by: String, limit: usize) -> Result<()> {
     Ok(())
 }
 
+// ---------- top-apps (daemon-recorded per-app history) ----------
+fn cmd_top_apps(cfg: Config, period: ProcPeriod, limit: usize, as_json: bool) -> Result<()> {
+    let conn = match db::open(&cfg.db_path_expanded(), true) {
+        Ok(c) => c,
+        Err(_) => {
+            if as_json {
+                println!(
+                    "{}",
+                    serde_json::json!({"api_version": db::API_VERSION, "rows": []})
+                );
+            } else {
+                eprintln!("no data yet — is the daemon running with proc_recording on?");
+            }
+            return Ok(());
+        }
+    };
+    let tz_local = cfg.timezone != "utc";
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let (from, label) = match period {
+        ProcPeriod::Day => (db::floor_day(now, tz_local), "today"),
+        ProcPeriod::Week => (db::floor_week(now, tz_local), "since Monday"),
+        ProcPeriod::Month => (db::floor_month(now, tz_local), "this month"),
+    };
+    let rows = db::query_proc(&conn, from, limit)?;
+    let dec = cfg.units == "decimal";
+    if as_json {
+        let arr: Vec<_> = rows
+            .iter()
+            .map(|(comm, rx, tx)| {
+                serde_json::json!({"app": comm, "rx": rx, "tx": tx, "total": rx + tx})
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::json!({"api_version": db::API_VERSION, "rows": arr})
+        );
+        return Ok(());
+    }
+    let max_tot = rows.first().map(|(_, rx, tx)| rx + tx).unwrap_or(1);
+    println!(
+        "{:<24} {:>10} {:>10} {:>10}  {}",
+        "APP", "DOWN", "UP", "TOTAL", label
+    );
+    for (comm, rx, tx) in rows {
+        let share = ((rx + tx) as f64 / max_tot as f64 * 10.0).round() as usize;
+        println!(
+            "{:<24} {:>10} {:>10} {:>10}  {}",
+            comm,
+            fmtx::fmt_bytes(rx, dec),
+            fmtx::fmt_bytes(tx, dec),
+            fmtx::fmt_bytes(rx + tx, dec),
+            fmtx::bar(share as f64 / 10.0, 10),
+        );
+    }
+    Ok(())
+}
+
 // ---------- status ----------
 fn cmd_status(cfg: Config, as_json: bool) -> Result<()> {
     let db_path = cfg.db_path_expanded();
@@ -547,6 +636,8 @@ fn cmd_config(cfg: Config, op: ConfigOp) -> Result<()> {
                 "retention_days_hourly",
                 "max_rate_mbit",
                 "timezone",
+                "proc_recording",
+                "proc_retention_days",
                 "monthly_budget_gb",
                 "budget_gb",
                 "budget_period",
@@ -738,8 +829,8 @@ Wants=time-sync.target
 Type=simple
 User=netmeter
 Group=netmeter
-AmbientCapabilities=CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

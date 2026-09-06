@@ -197,7 +197,7 @@ notify_on_budget = true
 ## 12. Roadmap (no build yet)
 
 - M1 MVP (ship): §§5–11 Linux, systemd system+user units, nft split (TOTAL-only fallback), show+live+top+status+config+export+import+completions, budgets+user-agent notify, man pages.
-- M2 (partly SHIPPED v0.2.0): `top-proc` live per-process view via AF_PACKET capture + `/proc` inode→PID attribution (nethogs/bandwhich method, best-effort: short flows → `unknown`, needs `sudo` for CAP_NET_RAW + full fd visibility). UPGRADE PATH: Aya eBPF `cgroup_skb`/TC hooks + Identity keying + persisted rollups (needs nightly, `bpf-linker`, BTF kernel — deferred until requested). Remaining: TUI graphs (SHIPPED: history bars in `live`), `install --user` TOTAL-only mode.
+- M2 SHIPPED v0.2.0 (revised — pragmatic, not Aya): `proc_cap::ProcRecorder` capture thread in daemon (AF_PACKET, all eligible ifaces, comm-keyed) → `proc_hourly` rollups, `proc_retention_days=30` prune in the same retention tick. Viewers need no privileges: `top-apps --period day|week|month [--json]` one-shot + `top-proc` auto-refresh TUI (1/2/3 period) + `live` right column (today). Caps widened to `NET_ADMIN+NET_RAW+DAC_READ_SEARCH+SYS_PTRACE` (least-privilege for sniffing; only byte counts + comm names stored, no payload). Disable via `proc_recording=false`. Aya eBPF upgrade path kept for later (precise, lower overhead) — rejected for now: nightly toolchain + untestable here. Remaining: `install --user` TOTAL-only mode.
 - M3: cross-OS TOTAL-only (no split documented), Prometheus endpoint (vnStat `vnstat-metrics.cgi` precedent).
 
 ## 13. Security & privacy

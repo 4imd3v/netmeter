@@ -7,7 +7,7 @@ use ratatui::{
 };
 use std::time::{Duration, Instant};
 
-use crate::{capture, config::Config, db, fmtx, top_proc::ProcSampler};
+use crate::{capture, config::Config, db, fmtx};
 
 pub fn run(cfg: Config, iface_filter: Option<String>) -> Result<()> {
     ratatui::run(|terminal| live_loop(terminal, &cfg, iface_filter.clone()))?;
@@ -45,13 +45,12 @@ fn live_loop(
     let mut week_tot = (0i64, 0i64);
     let mut month_used: i64 = 0;
     let mut month_split = (0i64, 0i64, 0i64, 0i64); // rx, tx, lan_rx, lan_tx
-                                                    // top-apps sampler shares the iface filter; None when unpermitted (no CAP_NET_RAW)
-    let mut sampler = ProcSampler::start(iface_filter.clone()).ok();
-    let mut app_rates: Vec<crate::top_proc::ProcRate> = vec![];
+                                                    // top apps come from daemon-recorded history: no capture here, no sudo needed
+    let mut app_rows_data: Vec<(String, i64, i64)> = vec![];
 
     'outer: loop {
-        // event-driven wait: keys stay responsive (≤100ms) while capture
-        // fills idle time instead of blocking the tick afterwards
+        // event-driven wait: keys stay responsive (≤100ms); capture lives
+        // in the daemon now, the dashboard only reads
         let deadline = Instant::now() + Duration::from_millis(interval_ms);
         while let Some(remain) = deadline.checked_duration_since(Instant::now()) {
             if crossterm::event::poll(remain.min(Duration::from_millis(100)))? {
@@ -70,11 +69,6 @@ fn live_loop(
                         }
                         _ => {}
                     }
-                }
-            }
-            if let Some(sm) = sampler.as_mut() {
-                if !sm.poll_budget(Duration::from_millis(50)) {
-                    sampler = None; // channel died; fall back to hint panel
                 }
             }
         }
@@ -139,9 +133,12 @@ fn live_loop(
             month_used = used;
             month_split = split;
         }
-        if let Some(sm) = sampler.as_mut() {
-            app_rates = sm.rates();
-            app_rates.truncate(12);
+        // top apps: daemon-recorded today totals (no capture, no sudo needed)
+        if tick_n % 5 == 1 {
+            app_rows_data = db::open(&cfg.db_path_expanded(), true)
+                .ok()
+                .and_then(|c| db::query_proc(&c, db::floor_day(now_ts(), tz_local), 12).ok())
+                .unwrap_or_default();
         }
         let uptime = started.elapsed().as_secs();
         let sess_rx: u64 = session.values().map(|v| v.0).sum();
@@ -293,20 +290,15 @@ fn live_loop(
                 left[1],
             );
 
-            // ---- top apps (right column) ----
-            if sampler.is_some() {
-                let app_rows: Vec<Row> = app_rates
+            // ---- top apps, daemon-recorded (right column) ----
+            {
+                let app_rows: Vec<Row> = app_rows_data
                     .iter()
-                    .map(|r| {
-                        let name = if r.pid == 0 {
-                            r.comm.clone()
-                        } else {
-                            format!("{} [{}]", r.comm, r.pid)
-                        };
+                    .map(|(comm, rx, tx)| {
                         Row::new(vec![
-                            name,
-                            fmtx::fmt_bytes(r.total_rx as i64, dec),
-                            fmtx::fmt_bytes(r.total_tx as i64, dec),
+                            comm.clone(),
+                            fmtx::fmt_bytes(*rx, dec),
+                            fmtx::fmt_bytes(*tx, dec),
                         ])
                     })
                     .collect();
@@ -326,16 +318,8 @@ fn live_loop(
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .title(" top apps "),
+                            .title(" top apps today · daemon "),
                     ),
-                    mid[1],
-                );
-            } else {
-                f.render_widget(
-                    Paragraph::new(
-                        "top apps need packet capture\nrun `sudo netmeter live`\nor `sudo netmeter top-proc` standalone",
-                    )
-                    .block(Block::default().borders(Borders::ALL).title(" top apps ")),
                     mid[1],
                 );
             }

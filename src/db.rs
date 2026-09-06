@@ -56,6 +56,10 @@ pub fn init(conn: &Connection) -> Result<()> {
          CREATE TABLE IF NOT EXISTS budget_events(
            month TEXT PRIMARY KEY, crossed80 INTEGER NOT NULL DEFAULT 0,
            crossed100 INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;
+         CREATE TABLE IF NOT EXISTS proc_hourly(
+           ts_hour INTEGER NOT NULL, comm TEXT NOT NULL,
+           rx INTEGER NOT NULL, tx INTEGER NOT NULL,
+           PRIMARY KEY(ts_hour, comm)) WITHOUT ROWID;
          CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT) WITHOUT ROWID;",
     )?;
     conn.execute(
@@ -246,6 +250,21 @@ pub fn floor_month(ts: i64, local: bool) -> i64 {
         .timestamp()
         .as_second()
 }
+/// Per-app totals in a window, biggest first (for `top-apps`).
+pub fn query_proc(conn: &Connection, from: i64, limit: usize) -> Result<Vec<(String, i64, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT comm, SUM(rx), SUM(tx) FROM proc_hourly WHERE ts_hour>=?1 \
+         GROUP BY comm ORDER BY SUM(rx)+SUM(tx) DESC LIMIT ?2",
+    )?;
+    let rows: Vec<(String, i64, i64)> = stmt
+        .query_map(params![from, limit as i64], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(rows)
+}
+
 #[allow(dead_code)]
 pub fn month_key(ts: i64, local: bool) -> String {
     let dt = zoned(ts, local).datetime();

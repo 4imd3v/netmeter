@@ -79,6 +79,10 @@ pub struct Config {
     pub retention_days_raw: i64,
     #[serde(default = "d_ret_hr")]
     pub retention_days_hourly: i64,
+    #[serde(default = "d_ret_raw")]
+    pub proc_retention_days: i64,
+    #[serde(default = "d_true")]
+    pub proc_recording: bool,
     #[serde(default = "d_max_mbit")]
     pub max_rate_mbit: u64,
     #[serde(default)]
@@ -108,6 +112,8 @@ impl Default for Config {
             force_lan_ifaces: d_force_lan(),
             retention_days_raw: d_ret_raw(),
             retention_days_hourly: d_ret_hr(),
+            proc_retention_days: d_ret_raw(),
+            proc_recording: true,
             max_rate_mbit: d_max_mbit(),
             monthly_budget_gb: 0.0,
             budget_period: d_budget_period(),

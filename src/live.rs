@@ -202,11 +202,11 @@ fn live_loop(
             // ---- middle: left stacks interfaces+usage, right top apps ----
             let mid = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(chunks[1]);
             let left = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Min(4), Constraint::Length(5)])
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(mid[0]);
 
             let table_rows: Vec<Row> = rows
@@ -251,6 +251,15 @@ fn live_loop(
                 usage_row(
                     "MONTH",
                     (month_split.0, month_split.1),
+                    dec,
+                ),
+                usage_row("LAN-M", (month_split.2, month_split.3), dec),
+                usage_row(
+                    "WAN-M",
+                    (
+                        (month_split.0 - month_split.2).max(0),
+                        (month_split.1 - month_split.3).max(0),
+                    ),
                     dec,
                 ),
             ];

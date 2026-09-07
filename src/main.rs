@@ -794,7 +794,7 @@ fn daemon_install(cfg: &Config) -> Result<()> {
         .status();
     std::fs::write("/etc/systemd/system/netmeter.service", unit)?;
     println!("wrote /etc/systemd/system/netmeter.service");
-    if let Some(mut home) = std::env::var("SUDO_USER").ok().and_then(|u| users_home(&u)) {
+    if let Some(mut home) = sudo_user_home() {
         home.push(".config/systemd/user/netmeter-agent.service");
         if let Some(p) = home.parent() {
             std::fs::create_dir_all(p).ok();
@@ -814,13 +814,31 @@ fn daemon_install(cfg: &Config) -> Result<()> {
 }
 
 fn users_home(user: &str) -> Option<std::path::PathBuf> {
-    // minimal: /home/<user>
+    // minimal fallback: /home/<user>
     let p = std::path::PathBuf::from(format!("/home/{user}"));
     if p.exists() {
         Some(p)
     } else {
         None
     }
+}
+
+/// Invoking (sudo) user's home: NSS-aware `getpwuid(SUDO_UID)` first
+/// (covers /root, custom HOME, LDAP), `/home` join as fallback.
+fn sudo_user_home() -> Option<std::path::PathBuf> {
+    if let Ok(uid) = std::env::var("SUDO_UID").ok()?.parse::<libc::uid_t>() {
+        let pw = unsafe { libc::getpwuid(uid) };
+        if !pw.is_null() {
+            let dir = unsafe { std::ffi::CStr::from_ptr((*pw).pw_dir) };
+            if let Ok(s) = dir.to_str() {
+                let p = std::path::PathBuf::from(s);
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    std::env::var("SUDO_USER").ok().and_then(|u| users_home(&u))
 }
 
 #[cfg(test)]

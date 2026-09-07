@@ -5,6 +5,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Gauge, Paragraph, Row, Sparkline, Table},
 };
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use crate::{capture, config::Config, db, fmtx, top_proc};
@@ -33,8 +34,8 @@ fn live_loop(
     let started = Instant::now();
 
     // network-speed histories (B/s per tick, 120 samples)
-    let mut hist_down: Vec<u64> = vec![0; 120];
-    let mut hist_up: Vec<u64> = vec![0; 120];
+    let mut hist_down: VecDeque<u64> = VecDeque::from(vec![0; 120]);
+    let mut hist_up: VecDeque<u64> = VecDeque::from(vec![0; 120]);
     let mut prev = capture::read_proc().unwrap_or_default();
     let mut prev_lan = capture::read_nft();
     let mut lan_rate = String::from("…");
@@ -118,11 +119,11 @@ fn live_loop(
 
         let tot_down: u64 = rows.iter().map(|r| r.down).sum();
         let tot_up: u64 = rows.iter().map(|r| r.up).sum();
-        hist_down.push(tot_down);
-        hist_up.push(tot_up);
-        if hist_down.len() > 120 {
-            hist_down.remove(0);
-            hist_up.remove(0);
+        hist_down.push_back(tot_down);
+        hist_up.push_back(tot_up);
+        while hist_down.len() > 120 {
+            hist_down.pop_front();
+            hist_up.pop_front();
         }
         let max_row = rows.iter().map(|r| r.down + r.up).max().unwrap_or(1);
 
@@ -159,8 +160,8 @@ fn live_loop(
         let budget_gb = budget_cfg.map(|(_, gb)| gb).unwrap_or(0.0);
         let (mrx, mtx, mlrx, mltx) = month_split;
         let mwan = (mrx - mlrx).max(0) + (mtx - mltx).max(0);
-        let hd = hist_down.clone();
-        let hu = hist_up.clone();
+        let hd: Vec<u64> = hist_down.iter().copied().collect();
+        let hu: Vec<u64> = hist_up.iter().copied().collect();
 
         terminal.draw(|f| {
             let chunks = Layout::default()

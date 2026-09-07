@@ -1,32 +1,23 @@
 /// Human byte formatting: binary (KiB/MiB…) default, decimal option.
 pub fn fmt_bytes(b: i64, decimal: bool) -> String {
-    let b = b.max(0) as f64;
     if decimal {
-        let units = ["B", "KB", "MB", "GB", "TB", "PB"];
-        let mut v = b;
-        let mut u = 0;
-        while v >= 1000.0 && u < units.len() - 1 {
-            v /= 1000.0;
-            u += 1;
-        }
-        if u == 0 {
-            format!("{v:.0} {}", units[u])
-        } else {
-            format!("{v:.1} {}", units[u])
-        }
+        fmt_scaled(b, 1000.0, &["B", "KB", "MB", "GB", "TB", "PB"])
     } else {
-        let units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
-        let mut v = b;
-        let mut u = 0;
-        while v >= 1024.0 && u < units.len() - 1 {
-            v /= 1024.0;
-            u += 1;
-        }
-        if u == 0 {
-            format!("{v:.0} {}", units[u])
-        } else {
-            format!("{v:.1} {}", units[u])
-        }
+        fmt_scaled(b, 1024.0, &["B", "KiB", "MiB", "GiB", "TiB", "PiB"])
+    }
+}
+
+fn fmt_scaled(b: i64, base: f64, units: &[&str]) -> String {
+    let mut v = b.max(0) as f64;
+    let mut u = 0;
+    while v >= base && u < units.len() - 1 {
+        v /= base;
+        u += 1;
+    }
+    if u == 0 {
+        format!("{v:.0} {}", units[u])
+    } else {
+        format!("{v:.1} {}", units[u])
     }
 }
 

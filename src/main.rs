@@ -28,6 +28,12 @@ enum OutFmt {
     Json,
 }
 
+#[derive(Debug, Clone, ValueEnum)]
+enum TopBy {
+    Iface,
+    Day,
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "netmeter", version, about = "Local-first LAN/WAN/TOTAL bandwidth meter (Linux)", long_about = None)]
 struct Cli {
@@ -57,8 +63,8 @@ enum Cmd {
     },
     /// Top talkers by iface or day
     Top {
-        #[arg(long, default_value = "iface")]
-        by: String,
+        #[arg(long, value_enum, default_value = "iface")]
+        by: TopBy,
         #[arg(long, default_value_t = 10)]
         limit: usize,
     },
@@ -410,7 +416,7 @@ fn parse_date(s: &str, local: bool) -> Result<i64> {
 }
 
 // ---------- top ----------
-fn cmd_top(cfg: Config, by: String, limit: usize) -> Result<()> {
+fn cmd_top(cfg: Config, by: TopBy, limit: usize) -> Result<()> {
     let conn = match db::open(&cfg.db_path_expanded(), true) {
         Ok(c) => c,
         Err(_) => {
@@ -423,7 +429,7 @@ fn cmd_top(cfg: Config, by: String, limit: usize) -> Result<()> {
         }
     };
     let dec = cfg.units == "decimal";
-    if by == "day" {
+    if matches!(by, TopBy::Day) {
         let rows = db::query_range(&conn, "daily", 0, i64::MAX, None)?;
         let mut rows = rows;
         rows.sort_by_key(|r| -(r.total()));

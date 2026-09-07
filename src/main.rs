@@ -782,41 +782,8 @@ fn daemon_install(cfg: &Config) -> Result<()> {
             "nft install failed ({e}) — continuing TOTAL-only; re-run as root to enable split"
         );
     }
-    let unit = r#"[Unit]
-Description=NetMeter bandwidth meter
-After=network.target time-sync.target
-Wants=time-sync.target
-
-[Service]
-Type=simple
-User=netmeter
-Group=netmeter
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ProtectKernelModules=true
-ReadWritePaths=/var/lib/netmeter
-ExecStart=/usr/bin/netmeter daemon run
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-"#;
-    let user_unit = r#"[Unit]
-Description=NetMeter budget notifier (user session)
-After=graphical-session.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/netmeter user-agent
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-"#;
+    let unit = include_str!("../packaging/netmeter.service");
+    let user_unit = include_str!("../packaging/netmeter-agent.service");
     std::fs::create_dir_all("/var/lib/netmeter").ok();
     // create netmeter user if missing
     let _ = std::process::Command::new("id")
@@ -867,5 +834,31 @@ fn users_home(user: &str) -> Option<std::path::PathBuf> {
         Some(p)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn embedded_units_match_packaging() {
+        for (embedded, path) in [
+            (
+                include_str!("../packaging/netmeter.service"),
+                "packaging/netmeter.service",
+            ),
+            (
+                include_str!("../packaging/netmeter-agent.service"),
+                "packaging/netmeter-agent.service",
+            ),
+        ] {
+            assert!(
+                embedded.contains("ExecStart=/usr/bin/netmeter"),
+                "{path} missing ExecStart"
+            );
+            assert!(
+                !embedded.contains("{{") && !embedded.contains("}}"),
+                "{path} leaks template placeholder"
+            );
+        }
     }
 }

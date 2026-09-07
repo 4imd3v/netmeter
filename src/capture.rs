@@ -136,12 +136,3 @@ pub fn install_nft(lan_subnets: &[String]) -> Result<()> {
     anyhow::ensure!(st.success(), "nft -f failed");
     Ok(())
 }
-
-/// Interface speed in Mbit/s from /sys/class/net/<if>/speed (may be missing).
-pub fn iface_speed_mbit(iface: &str) -> Option<u64> {
-    std::fs::read_to_string(format!("/sys/class/net/{iface}/speed"))
-        .ok()?
-        .trim()
-        .parse()
-        .ok()
-}

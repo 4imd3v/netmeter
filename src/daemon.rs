@@ -35,7 +35,10 @@ fn delta(old: u64, new: u64, max_bytes_per_tick: u64) -> (u64, bool) {
 }
 
 pub fn max_bytes_per_tick(cfg: &Config, iface: &str) -> u64 {
-    let mbit = capture::iface_speed_mbit(iface).unwrap_or(cfg.max_rate_mbit);
+    let mbit = std::fs::read_to_string(format!("/sys/class/net/{iface}/speed"))
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(cfg.max_rate_mbit);
     let mbit = mbit.max(1);
     // bytes = mbit*1e6/8 * interval * slack(1.25)
     ((mbit as f64 * 1_000_000.0 / 8.0) * cfg.poll_interval_sec as f64 * 1.25) as u64

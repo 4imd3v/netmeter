@@ -275,6 +275,23 @@ pub fn floor_week(ts: i64, local: bool) -> i64 {
         .timestamp()
         .as_second()
 }
+/// Shared day/week/month window (proc views + budget start). One enum for CLI, TUI keys, and floors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum Window {
+    Day,
+    Week,
+    Month,
+}
+
+/// Midnight/Monday/month-start floor for a [`Window`].
+pub fn window_floor(w: Window, ts: i64, local: bool) -> i64 {
+    match w {
+        Window::Day => floor_day(ts, local),
+        Window::Week => floor_week(ts, local),
+        Window::Month => floor_month(ts, local),
+    }
+}
+
 /// Window start for a budget period ("day" | "week" | "month").
 pub fn budget_window_start(ts: i64, local: bool, period: &str) -> i64 {
     match period {

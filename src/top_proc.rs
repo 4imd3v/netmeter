@@ -15,29 +15,9 @@ use std::time::{Duration, Instant};
 
 use crate::{config::Config, db, fmtx};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PPeriod {
-    Day,
-    Week,
-    Month,
-}
-
-pub fn run(cfg: Config, period: PPeriodArg) -> Result<()> {
-    let mode = match period {
-        PPeriodArg::Day => PPeriod::Day,
-        PPeriodArg::Week => PPeriod::Week,
-        PPeriodArg::Month => PPeriod::Month,
-    };
-    ratatui::run(|term| view_loop(term, &cfg, mode))?;
+pub fn run(cfg: Config, period: db::Window) -> Result<()> {
+    ratatui::run(|term| view_loop(term, &cfg, period))?;
     Ok(())
-}
-
-/// Mirrors the CLI `ProcPeriod` without coupling the TUI to clap types.
-#[derive(Debug, Clone, Copy)]
-pub enum PPeriodArg {
-    Day,
-    Week,
-    Month,
 }
 
 /// Today totals for the shared live/viewer top-apps column (one query; n=12 live, 25 viewer).
@@ -46,22 +26,27 @@ pub fn today_top_apps(
     cfg: &Config,
     n: usize,
 ) -> Vec<(String, i64, i64)> {
-    db::query_proc(conn, window_start(PPeriod::Day, cfg.timezone != "utc"), n).unwrap_or_default()
+    db::query_proc(
+        conn,
+        window_start(db::Window::Day, cfg.timezone != "utc"),
+        n,
+    )
+    .unwrap_or_default()
 }
 
-fn window_start(period: PPeriod, local: bool) -> i64 {
+fn window_start(period: db::Window, local: bool) -> i64 {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    match period {
-        PPeriod::Day => db::floor_day(now, local),
-        PPeriod::Week => db::floor_week(now, local),
-        PPeriod::Month => db::floor_month(now, local),
-    }
+    db::window_floor(period, now, local)
 }
 
-fn view_loop(term: &mut ratatui::DefaultTerminal, cfg: &Config, mut period: PPeriod) -> Result<()> {
+fn view_loop(
+    term: &mut ratatui::DefaultTerminal,
+    cfg: &Config,
+    mut period: db::Window,
+) -> Result<()> {
     let mut dec = cfg.units == "decimal";
     let local = cfg.timezone != "utc";
     let mut rows: Vec<(String, i64, i64)> = vec![];
@@ -78,9 +63,9 @@ fn view_loop(term: &mut ratatui::DefaultTerminal, cfg: &Config, mut period: PPer
                             return Ok(())
                         }
                         crossterm::event::KeyCode::Char('u') => dec = !dec,
-                        crossterm::event::KeyCode::Char('1') => period = PPeriod::Day,
-                        crossterm::event::KeyCode::Char('2') => period = PPeriod::Week,
-                        crossterm::event::KeyCode::Char('3') => period = PPeriod::Month,
+                        crossterm::event::KeyCode::Char('1') => period = db::Window::Day,
+                        crossterm::event::KeyCode::Char('2') => period = db::Window::Week,
+                        crossterm::event::KeyCode::Char('3') => period = db::Window::Month,
                         _ => {}
                     }
                 }
@@ -89,14 +74,14 @@ fn view_loop(term: &mut ratatui::DefaultTerminal, cfg: &Config, mut period: PPer
         let _ = tick;
         tick = Instant::now();
         let label = match period {
-            PPeriod::Day => "today",
-            PPeriod::Week => "since Monday",
-            PPeriod::Month => "this month",
+            db::Window::Day => "today",
+            db::Window::Week => "since Monday",
+            db::Window::Month => "this month",
         };
         rows = db::open(&cfg.db_path_expanded(), true)
             .ok()
             .map(|c| match period {
-                PPeriod::Day => today_top_apps(&c, cfg, 25),
+                db::Window::Day => today_top_apps(&c, cfg, 25),
                 _ => db::query_proc(&c, window_start(period, local), 25).unwrap_or_default(),
             })
             .unwrap_or_default();

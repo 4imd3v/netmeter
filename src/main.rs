@@ -106,7 +106,7 @@ enum Cmd {
     /// Per-app usage history from daemon recording (day|week|month)
     TopApps {
         #[arg(long, value_enum, default_value = "day")]
-        period: ProcPeriod,
+        period: db::Window,
         #[arg(long, default_value_t = 20)]
         limit: usize,
         #[arg(long)]
@@ -115,7 +115,7 @@ enum Cmd {
     /// Per-app usage dashboard, auto-refreshing (daemon-recorded, no sudo needed)
     TopProc {
         #[arg(long, value_enum, default_value = "day")]
-        period: ProcPeriod,
+        period: db::Window,
     },
     /// Per-user budget notifier (runs as systemd --user unit)
     UserAgent {
@@ -130,13 +130,6 @@ enum ConfigOp {
     Set { key: String, value: String },
     Path,
     Reset,
-}
-
-#[derive(Debug, Clone, ValueEnum)]
-enum ProcPeriod {
-    Day,
-    Week,
-    Month,
 }
 
 #[derive(Subcommand, Debug)]
@@ -189,14 +182,7 @@ fn main() -> Result<()> {
             limit,
             json,
         } => cmd_top_apps(cfg, period, limit, json),
-        Cmd::TopProc { period } => top_proc::run(
-            cfg,
-            match period {
-                ProcPeriod::Day => top_proc::PPeriodArg::Day,
-                ProcPeriod::Week => top_proc::PPeriodArg::Week,
-                ProcPeriod::Month => top_proc::PPeriodArg::Month,
-            },
-        ),
+        Cmd::TopProc { period } => top_proc::run(cfg, period),
         Cmd::UserAgent { once } => user_agent::run(cfg, once),
     }
 }
@@ -453,7 +439,7 @@ fn cmd_top(cfg: Config, by: TopBy, limit: usize) -> Result<()> {
 }
 
 // ---------- top-apps (daemon-recorded per-app history) ----------
-fn cmd_top_apps(cfg: Config, period: ProcPeriod, limit: usize, as_json: bool) -> Result<()> {
+fn cmd_top_apps(cfg: Config, period: db::Window, limit: usize, as_json: bool) -> Result<()> {
     let conn = match db::open(&cfg.db_path_expanded(), true) {
         Ok(c) => c,
         Err(_) => {
@@ -474,9 +460,9 @@ fn cmd_top_apps(cfg: Config, period: ProcPeriod, limit: usize, as_json: bool) ->
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
     let (from, label) = match period {
-        ProcPeriod::Day => (db::floor_day(now, tz_local), "today"),
-        ProcPeriod::Week => (db::floor_week(now, tz_local), "since Monday"),
-        ProcPeriod::Month => (db::floor_month(now, tz_local), "this month"),
+        db::Window::Day => (db::floor_day(now, tz_local), "today"),
+        db::Window::Week => (db::floor_week(now, tz_local), "since Monday"),
+        db::Window::Month => (db::floor_month(now, tz_local), "this month"),
     };
     let rows = db::query_proc(&conn, from, limit)?;
     let dec = cfg.units == "decimal";

@@ -217,7 +217,6 @@ fn cmd_show(
             return Ok(());
         }
     };
-    let _ = db::rollup(&conn, cfg.timezone != "utc"); // best-effort backfill (read-only may fail on locked? ignore)
     let tz_local = cfg.timezone != "utc";
     let dec = cfg.units == "decimal";
     let now = std::time::SystemTime::now()

@@ -172,13 +172,7 @@ impl Config {
     }
 
     pub fn db_path_expanded(&self) -> PathBuf {
-        let s = &self.database_path;
-        if let Some(rest) = s.strip_prefix("~/") {
-            if let Ok(h) = std::env::var("HOME") {
-                return PathBuf::from(h).join(rest);
-            }
-        }
-        PathBuf::from(shellexpand_tilde(s))
+        PathBuf::from(shellexpand_tilde(&self.database_path))
     }
 
     pub fn excluded(&self, iface: &str) -> bool {

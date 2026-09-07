@@ -619,35 +619,9 @@ fn cmd_config(cfg: Config, op: ConfigOp) -> Result<()> {
         }
         ConfigOp::Set { key, value } => {
             // Root writes the system file (the one the daemon + sudo actually read);
-            // normal users write their overlay (display prefs; daemon keys warn below).
+            // normal users write their overlay (display prefs).
             // SAFETY: geteuid has no failure modes.
             let root = unsafe { libc::geteuid() } == 0;
-            // Daemon runs as system user and only reads /etc + its own file:
-            // nudge daemon-owned keys toward the system config.
-            const DAEMON_KEYS: &[&str] = &[
-                "database_path",
-                "poll_interval_sec",
-                "lan_subnets",
-                "exclude_ifaces",
-                "force_lan_ifaces",
-                "classify_tailscale_as_lan",
-                "retention_days_raw",
-                "retention_days_hourly",
-                "max_rate_mbit",
-                "timezone",
-                "proc_recording",
-                "proc_retention_days",
-                "monthly_budget_gb",
-                "budget_gb",
-                "budget_period",
-                "budget_basis",
-                "notify_on_budget",
-            ];
-            if DAEMON_KEYS.contains(&key.as_str()) && !root {
-                eprintln!(
-                    "note: `{key}` affects the daemon, which reads /etc/netmeter/config.toml — run the same `config set` with sudo, or the service won't see this value"
-                );
-            }
             let path = if root {
                 Config::system_path()
             } else {

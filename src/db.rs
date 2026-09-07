@@ -220,35 +220,29 @@ fn zoned(ts: i64, local: bool) -> jiff::Zoned {
         .unwrap()
         .to_zoned(tz(local))
 }
-pub fn floor_hour(ts: i64, local: bool) -> i64 {
-    let z = zoned(ts, local);
-    let dt = z.datetime();
-    jiff::civil::DateTime::new(dt.year(), dt.month(), dt.day(), dt.hour(), 0, 0, 0)
+/// Shared midnight-floor tail: resolve the zone once, rebuild at picked y/mo/d/h.
+fn floor_dt(ts: i64, local: bool, pick: fn(jiff::civil::DateTime) -> (i16, i8, i8, i8)) -> i64 {
+    let tzone = tz(local);
+    let dt = jiff::Timestamp::from_second(ts)
         .unwrap()
-        .to_zoned(z.time_zone().clone())
+        .to_zoned(tzone.clone())
+        .datetime();
+    let (y, mo, d, h) = pick(dt);
+    jiff::civil::DateTime::new(y, mo, d, h, 0, 0, 0)
+        .unwrap()
+        .to_zoned(tzone)
         .unwrap()
         .timestamp()
         .as_second()
+}
+pub fn floor_hour(ts: i64, local: bool) -> i64 {
+    floor_dt(ts, local, |dt| (dt.year(), dt.month(), dt.day(), dt.hour()))
 }
 pub fn floor_day(ts: i64, local: bool) -> i64 {
-    let z = zoned(ts, local);
-    let dt = z.datetime();
-    jiff::civil::DateTime::new(dt.year(), dt.month(), dt.day(), 0, 0, 0, 0)
-        .unwrap()
-        .to_zoned(z.time_zone().clone())
-        .unwrap()
-        .timestamp()
-        .as_second()
+    floor_dt(ts, local, |dt| (dt.year(), dt.month(), dt.day(), 0))
 }
 pub fn floor_month(ts: i64, local: bool) -> i64 {
-    let z = zoned(ts, local);
-    let dt = z.datetime();
-    jiff::civil::DateTime::new(dt.year(), dt.month(), 1, 0, 0, 0, 0)
-        .unwrap()
-        .to_zoned(z.time_zone().clone())
-        .unwrap()
-        .timestamp()
-        .as_second()
+    floor_dt(ts, local, |dt| (dt.year(), dt.month(), 1, 0))
 }
 /// Per-app totals in a window, biggest first (for `top-apps`).
 pub fn query_proc(conn: &Connection, from: i64, limit: usize) -> Result<Vec<(String, i64, i64)>> {

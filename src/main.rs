@@ -337,26 +337,9 @@ fn cmd_show(
 
 fn rebucket_week(rows: Vec<db::Row>, local: bool) -> Vec<db::Row> {
     use std::collections::BTreeMap;
-    let tzone = if local {
-        jiff::tz::TimeZone::system()
-    } else {
-        jiff::tz::TimeZone::UTC
-    };
     let mut m: BTreeMap<i64, db::Row> = BTreeMap::new();
     for r in rows {
-        let z = jiff::Timestamp::from_second(r.ts)
-            .unwrap()
-            .to_zoned(tzone.clone());
-        let dt = z.datetime();
-        let off = dt.date().weekday().to_monday_zero_offset() as i32;
-        let monday = dt.date().checked_sub(jiff::ToSpan::days(off)).unwrap();
-        let monday_ts =
-            jiff::civil::DateTime::new(monday.year(), monday.month(), monday.day(), 0, 0, 0, 0)
-                .unwrap()
-                .to_zoned(tzone.clone())
-                .unwrap()
-                .timestamp()
-                .as_second();
+        let monday_ts = db::floor_week(r.ts, local);
         let e = m.entry(monday_ts).or_insert(db::Row {
             ts: monday_ts,
             iface: "_all".into(),

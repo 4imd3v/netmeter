@@ -143,30 +143,12 @@ impl Config {
         }
         let mut cfg: Self = val.try_into()?;
         // env overrides NETMETER_*
-        if let Ok(v) = std::env::var("NETMETER_DATABASE_PATH") {
-            cfg.database_path = v;
-        }
-        if let Ok(v) = std::env::var("NETMETER_POLL_INTERVAL_SEC") {
-            if let Ok(n) = v.parse() {
-                cfg.poll_interval_sec = n;
-            }
-        }
-        if let Ok(v) = std::env::var("NETMETER_UNITS") {
-            cfg.units = v;
-        }
-        if let Ok(v) = std::env::var("NETMETER_MONTHLY_BUDGET_GB") {
-            if let Ok(n) = v.parse() {
-                cfg.monthly_budget_gb = n;
-            }
-        }
-        if let Ok(v) = std::env::var("NETMETER_BUDGET_GB") {
-            if let Ok(n) = v.parse() {
-                cfg.budget_gb = n;
-            }
-        }
-        if let Ok(v) = std::env::var("NETMETER_BUDGET_PERIOD") {
-            cfg.budget_period = v;
-        }
+        str_env("NETMETER_DATABASE_PATH", &mut cfg.database_path);
+        num_env("NETMETER_POLL_INTERVAL_SEC", &mut cfg.poll_interval_sec);
+        str_env("NETMETER_UNITS", &mut cfg.units);
+        num_env("NETMETER_MONTHLY_BUDGET_GB", &mut cfg.monthly_budget_gb);
+        num_env("NETMETER_BUDGET_GB", &mut cfg.budget_gb);
+        str_env("NETMETER_BUDGET_PERIOD", &mut cfg.budget_period);
         cfg.poll_interval_sec = cfg.poll_interval_sec.clamp(1, 60);
         Ok(cfg)
     }
@@ -198,6 +180,20 @@ impl Config {
             return Some(("month", self.monthly_budget_gb));
         }
         None
+    }
+}
+
+fn str_env(key: &str, dst: &mut String) {
+    if let Ok(v) = std::env::var(key) {
+        *dst = v;
+    }
+}
+
+fn num_env<T: std::str::FromStr>(key: &str, dst: &mut T) {
+    if let Ok(v) = std::env::var(key) {
+        if let Ok(n) = v.parse() {
+            *dst = n;
+        }
     }
 }
 

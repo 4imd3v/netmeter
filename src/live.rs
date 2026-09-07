@@ -127,18 +127,23 @@ fn live_loop(
         let max_row = rows.iter().map(|r| r.down + r.up).max().unwrap_or(1);
 
         if tick_n % 5 == 1 {
-            day_tot = query_since(cfg, db::floor_day(now_ts(), tz_local));
-            week_tot = query_week_total(cfg, tz_local);
-            let (used, split) = query_budget(cfg, tz_local);
-            month_used = used;
-            month_split = split;
-        }
-        // top apps: daemon-recorded today totals (no capture, no sudo needed)
-        if tick_n % 5 == 1 {
-            app_rows_data = db::open(&cfg.db_path_expanded(), true)
-                .ok()
-                .and_then(|c| db::query_proc(&c, db::floor_day(now_ts(), tz_local), 12).ok())
-                .unwrap_or_default();
+            // one read-only open per refresh; daemon stays the sole writer
+            if let Ok(conn) = db::open(&cfg.db_path_expanded(), true) {
+                day_tot = query_since(&conn, db::floor_day(now_ts(), tz_local));
+                week_tot = query_week_total(&conn, tz_local);
+                let (used, split) = query_budget(&conn, cfg, tz_local);
+                month_used = used;
+                month_split = split;
+                // top apps: daemon-recorded today totals (no capture, no sudo needed)
+                app_rows_data = db::query_proc(&conn, db::floor_day(now_ts(), tz_local), 12)
+                    .unwrap_or_default();
+            } else {
+                day_tot = (0, 0);
+                week_tot = (0, 0);
+                month_used = 0;
+                month_split = (0, 0, 0, 0);
+                app_rows_data = vec![];
+            }
         }
         let uptime = started.elapsed().as_secs();
         let sess_rx: u64 = session.values().map(|v| v.0).sum();
@@ -424,64 +429,35 @@ fn now_ts() -> i64 {
         .unwrap_or(0)
 }
 
-fn query_since(cfg: &Config, from: i64) -> (i64, i64) {
-    let Ok(conn) = db::open(&cfg.db_path_expanded(), true) else {
-        return (0, 0);
-    };
+fn window_sum(conn: &rusqlite::Connection, from: i64) -> (i64, i64, i64, i64) {
     conn.query_row(
-        "SELECT COALESCE(SUM(rx_total),0), COALESCE(SUM(tx_total),0) FROM samples WHERE ts>=?1",
+        "SELECT COALESCE(SUM(rx_total),0), COALESCE(SUM(tx_total),0), COALESCE(SUM(lan_rx),0), COALESCE(SUM(lan_tx),0) FROM samples WHERE ts>=?1",
         rusqlite::params![from],
-        |r| Ok((r.get(0)?, r.get(1)?)),
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
     )
-    .unwrap_or((0, 0))
+    .unwrap_or((0, 0, 0, 0))
+}
+
+fn query_since(conn: &rusqlite::Connection, from: i64) -> (i64, i64) {
+    let (rx, tx, _, _) = window_sum(conn, from);
+    (rx, tx)
 }
 
 /// Monday-00:00 → now (local or UTC week).
-fn query_week_total(cfg: &Config, local: bool) -> (i64, i64) {
-    let Ok(conn) = db::open(&cfg.db_path_expanded(), true) else {
-        return (0, 0);
-    };
-    let now = now_ts();
-    let tzone = if local {
-        jiff::tz::TimeZone::system()
-    } else {
-        jiff::tz::TimeZone::UTC
-    };
-    let dt = jiff::Timestamp::from_second(now)
-        .unwrap()
-        .to_zoned(tzone.clone())
-        .datetime();
-    let off = dt.date().weekday().to_monday_zero_offset() as i32;
-    let monday = dt.date().checked_sub(jiff::ToSpan::days(off)).unwrap();
-    let m0 = jiff::civil::DateTime::new(monday.year(), monday.month(), monday.day(), 0, 0, 0, 0)
-        .unwrap()
-        .to_zoned(tzone)
-        .unwrap()
-        .timestamp()
-        .as_second();
-    conn.query_row(
-        "SELECT COALESCE(SUM(rx_total),0), COALESCE(SUM(tx_total),0) FROM samples WHERE ts>=?1",
-        rusqlite::params![m0],
-        |r| Ok((r.get(0)?, r.get(1)?)),
-    )
-    .unwrap_or((0, 0))
+fn query_week_total(conn: &rusqlite::Connection, local: bool) -> (i64, i64) {
+    query_since(conn, db::floor_week(now_ts(), local))
 }
 
 /// Returns (basis_used, (rx, tx, lan_rx, lan_tx)) for the budget window
 /// (day/week/month per config; legacy monthly_budget_gb implies month).
-fn query_budget(cfg: &Config, local: bool) -> (i64, (i64, i64, i64, i64)) {
-    let Ok(conn) = db::open(&cfg.db_path_expanded(), true) else {
-        return (0, (0, 0, 0, 0));
-    };
+fn query_budget(
+    conn: &rusqlite::Connection,
+    cfg: &Config,
+    local: bool,
+) -> (i64, (i64, i64, i64, i64)) {
     let period = cfg.effective_budget().map(|(p, _)| p).unwrap_or("month");
     let m0 = db::budget_window_start(now_ts(), local, period);
-    let (rx, tx, lrx, ltx): (i64, i64, i64, i64) = conn
-        .query_row(
-            "SELECT COALESCE(SUM(rx_total),0), COALESCE(SUM(tx_total),0), COALESCE(SUM(lan_rx),0), COALESCE(SUM(lan_tx),0) FROM samples WHERE ts>=?1",
-            rusqlite::params![m0],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-        )
-        .unwrap_or((0, 0, 0, 0));
+    let (rx, tx, lrx, ltx) = window_sum(conn, m0);
     let used = if cfg.budget_basis == "wan" {
         (rx - lrx).max(0) + (tx - ltx).max(0)
     } else {

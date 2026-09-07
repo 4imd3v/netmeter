@@ -32,9 +32,6 @@ fn d_basis() -> String {
 fn d_budget_period() -> String {
     "month".into()
 }
-fn d_empty() -> Vec<String> {
-    vec![]
-}
 fn d_excl() -> Vec<String> {
     vec![
         "lo".into(),
@@ -95,8 +92,6 @@ pub struct Config {
     pub budget_basis: String, // total | wan
     #[serde(default = "d_true")]
     pub notify_on_budget: bool,
-    #[serde(default = "d_empty")]
-    pub _unused: Vec<String>,
 }
 
 impl Default for Config {
@@ -120,7 +115,6 @@ impl Default for Config {
             budget_gb: 0.0,
             budget_basis: d_basis(),
             notify_on_budget: true,
-            _unused: vec![],
         }
     }
 }

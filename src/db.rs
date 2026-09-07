@@ -265,11 +265,6 @@ pub fn query_proc(conn: &Connection, from: i64, limit: usize) -> Result<Vec<(Str
     Ok(rows)
 }
 
-#[allow(dead_code)]
-pub fn month_key(ts: i64, local: bool) -> String {
-    let dt = zoned(ts, local).datetime();
-    format!("{:04}-{:02}", dt.year(), dt.month())
-}
 /// Monday 00:00 of the week containing ts.
 pub fn floor_week(ts: i64, local: bool) -> i64 {
     let tzone = tz(local);

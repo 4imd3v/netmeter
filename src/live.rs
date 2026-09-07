@@ -7,7 +7,7 @@ use ratatui::{
 };
 use std::time::{Duration, Instant};
 
-use crate::{capture, config::Config, db, fmtx};
+use crate::{capture, config::Config, db, fmtx, top_proc};
 
 pub fn run(cfg: Config, iface_filter: Option<String>) -> Result<()> {
     ratatui::run(|terminal| live_loop(terminal, &cfg, iface_filter.clone()))?;
@@ -135,8 +135,7 @@ fn live_loop(
                 month_used = used;
                 month_split = split;
                 // top apps: daemon-recorded today totals (no capture, no sudo needed)
-                app_rows_data = db::query_proc(&conn, db::floor_day(now_ts(), tz_local), 12)
-                    .unwrap_or_default();
+                app_rows_data = top_proc::today_top_apps(&conn, cfg, 12);
             } else {
                 day_tot = (0, 0);
                 week_tot = (0, 0);

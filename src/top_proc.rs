@@ -40,6 +40,15 @@ pub enum PPeriodArg {
     Month,
 }
 
+/// Today totals for the shared live/viewer top-apps column (one query; n=12 live, 25 viewer).
+pub fn today_top_apps(
+    conn: &rusqlite::Connection,
+    cfg: &Config,
+    n: usize,
+) -> Vec<(String, i64, i64)> {
+    db::query_proc(conn, window_start(PPeriod::Day, cfg.timezone != "utc"), n).unwrap_or_default()
+}
+
 fn window_start(period: PPeriod, local: bool) -> i64 {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -86,7 +95,10 @@ fn view_loop(term: &mut ratatui::DefaultTerminal, cfg: &Config, mut period: PPer
         };
         rows = db::open(&cfg.db_path_expanded(), true)
             .ok()
-            .and_then(|c| db::query_proc(&c, window_start(period, local), 25).ok())
+            .map(|c| match period {
+                PPeriod::Day => today_top_apps(&c, cfg, 25),
+                _ => db::query_proc(&c, window_start(period, local), 25).unwrap_or_default(),
+            })
             .unwrap_or_default();
         let max_tot = rows.first().map(|(_, rx, tx)| rx + tx).unwrap_or(1);
         let tot: i64 = rows.iter().map(|(_, rx, tx)| rx + tx).sum();

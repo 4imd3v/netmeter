@@ -97,7 +97,7 @@ pub fn run(cfg: Config) -> Result<()> {
         let lan_now = capture::read_nft();
         let (lan_rx_d, lan_tx_d) = match (prev_lan, lan_now) {
             (Some((pr, pt)), Some((nr, nt))) => {
-                let maxb = (cfg.max_rate_mbit as f64 * 1e6 / 8.0 * interval as f64 * 1.25) as u64;
+                let maxb = max_bytes_per_tick(&cfg, "lan");
                 let (dr, _) = delta(pr, nr, maxb);
                 let (dt, _) = delta(pt, nt, maxb);
                 (dr as i64, dt as i64)

@@ -139,7 +139,7 @@ CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);  -- schema_version,
 
 ## 9. Budgets & notifications (Q6 LOCKED, design corrected)
 
-- Config: `monthly_budget_gb = 0` (off) else e.g. 50. `show --period month` renders `used/budget bar %`.
+- Config: `budget_gb = 0` (off) else e.g. 50 with `budget_period = "month"`. `show --period month` renders `used/budget bar %`.
 - Daemon: evaluates month-to-date WAN+LAN TOTAL at each tick; on crossing 80%/100% inserts `budget_events` + journal log. Sends NOTHING itself (no session bus).
 - User agent: `netmeter user-agent` under systemd **user** unit (`--user`, `After=graphical-session.target`, restart on-failure, 60s poll): reads DB `budget_events`, fires `notify-rust 4.x` (zbus default) summary `NetMeter: 80% of Sep budget (40/50 GiB)`; fallback `notify-send` if D-Bus absent; hold `NotificationHandle` briefly + `on_close` for GNOME/Wayland persistence quirk (issue #218). Headless (no `DBUS_SESSION_BUS_ADDRESS`) → skip silently, `status` shows `notified80/100`.
 - `notify_on_budget=true` default; `budget_basis = total|wan` (default `total`; metered-ISP users set `wan`).
@@ -186,7 +186,8 @@ retention_days_raw = 30
 retention_days_hourly = 365
 max_rate_mbit = 10000
 # max_rate_mbit_eth0 = 1000
-monthly_budget_gb = 0
+budget_gb = 0
+budget_period = "month"
 budget_basis = "total"      # total | wan
 notify_on_budget = true
 ```

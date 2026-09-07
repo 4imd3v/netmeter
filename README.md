@@ -34,7 +34,7 @@ netmeter config set budget_period week   # day | week | month
 netmeter completions bash >> ~/.bashrc
 ```
 
-Budgets: set `budget_gb` + `budget_period` (legacy `monthly_budget_gb` still works), enable the user agent once per desktop user:
+Budgets: set `budget_gb` + `budget_period`, enable the user agent once per desktop user:
 
 ```sh
 systemctl --user enable --now netmeter-agent   # after install copies the unit

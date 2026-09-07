@@ -82,8 +82,6 @@ pub struct Config {
     pub proc_recording: bool,
     #[serde(default = "d_max_mbit")]
     pub max_rate_mbit: u64,
-    #[serde(default)]
-    pub monthly_budget_gb: f64,
     #[serde(default = "d_budget_period")]
     pub budget_period: String, // day | week | month
     #[serde(default)]
@@ -110,7 +108,6 @@ impl Default for Config {
             proc_retention_days: d_ret_raw(),
             proc_recording: true,
             max_rate_mbit: d_max_mbit(),
-            monthly_budget_gb: 0.0,
             budget_period: d_budget_period(),
             budget_gb: 0.0,
             budget_basis: d_basis(),
@@ -146,7 +143,6 @@ impl Config {
         str_env("NETMETER_DATABASE_PATH", &mut cfg.database_path);
         num_env("NETMETER_POLL_INTERVAL_SEC", &mut cfg.poll_interval_sec);
         str_env("NETMETER_UNITS", &mut cfg.units);
-        num_env("NETMETER_MONTHLY_BUDGET_GB", &mut cfg.monthly_budget_gb);
         num_env("NETMETER_BUDGET_GB", &mut cfg.budget_gb);
         str_env("NETMETER_BUDGET_PERIOD", &mut cfg.budget_period);
         cfg.poll_interval_sec = cfg.poll_interval_sec.clamp(1, 60);
@@ -167,7 +163,7 @@ impl Config {
         self.force_lan_ifaces.iter().any(|p| glob_match(p, iface))
     }
 
-    /// Effective budget: new (period, budget_gb) wins; legacy monthly_budget_gb falls back.
+    /// Effective budget: (period, budget_gb); None when off.
     pub fn effective_budget(&self) -> Option<(&str, f64)> {
         if self.budget_gb > 0.0 {
             let p = match self.budget_period.as_str() {
@@ -175,9 +171,6 @@ impl Config {
                 _ => "month",
             };
             return Some((p, self.budget_gb));
-        }
-        if self.monthly_budget_gb > 0.0 {
-            return Some(("month", self.monthly_budget_gb));
         }
         None
     }

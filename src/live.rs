@@ -448,7 +448,7 @@ fn query_week_total(conn: &rusqlite::Connection, local: bool) -> (i64, i64) {
 }
 
 /// Returns (basis_used, (rx, tx, lan_rx, lan_tx)) for the budget window
-/// (day/week/month per config; legacy monthly_budget_gb implies month).
+/// (day/week/month per config).
 fn query_budget(
     conn: &rusqlite::Connection,
     cfg: &Config,

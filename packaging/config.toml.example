@@ -13,8 +13,7 @@ retention_days_hourly = 365
 proc_recording = true      # always-on per-app capture (daemon needs CAP_NET_RAW)
 proc_retention_days = 30  # per-app hourly history kept this long
 max_rate_mbit = 10000
-monthly_budget_gb = 0   # legacy: implies month window; prefer budget_* below
 budget_period = "month" # day | week | month
-budget_gb = 0           # 0 = off; wins over monthly_budget_gb when > 0
+budget_gb = 0           # 0 = off
 budget_basis = "total"  # total | wan
 notify_on_budget = true

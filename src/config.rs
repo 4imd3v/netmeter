@@ -68,8 +68,6 @@ pub struct Config {
     pub exclude_ifaces: Vec<String>,
     #[serde(default = "d_lan")]
     pub lan_subnets: Vec<String>,
-    #[serde(default = "d_true")]
-    pub classify_tailscale_as_lan: bool,
     #[serde(default = "d_force_lan")]
     pub force_lan_ifaces: Vec<String>,
     #[serde(default = "d_ret_raw")]
@@ -101,7 +99,6 @@ impl Default for Config {
             timezone: d_tz(),
             exclude_ifaces: d_excl(),
             lan_subnets: d_lan(),
-            classify_tailscale_as_lan: true,
             force_lan_ifaces: d_force_lan(),
             retention_days_raw: d_ret_raw(),
             retention_days_hourly: d_ret_hr(),
@@ -157,9 +154,6 @@ impl Config {
         self.exclude_ifaces.iter().any(|p| glob_match(p, iface))
     }
     pub fn forced_lan(&self, iface: &str) -> bool {
-        if self.classify_tailscale_as_lan && iface.starts_with("tailscale0") {
-            return true;
-        }
         self.force_lan_ifaces.iter().any(|p| glob_match(p, iface))
     }
 

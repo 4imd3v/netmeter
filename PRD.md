@@ -10,7 +10,7 @@
 2. **nft design corrected → named counters in private table, accept-only.** Anonymous counters hit reset bug (#1401); `flush ruleset` would nuke Docker/firewalld. We use `table inet netmeter` + named counters + `list counters` JSON. Coexists with firewalld/Docker/uFW at `priority filter`. See §5.
 3. **Notification design corrected → daemon CANNOT notify.** System service (root) has no user-session D-Bus; `notify-send` from daemon silently fails on Wayland/GNOME46+. New split: daemon records `budget_events` in DB+journal; `netmeter user-agent` (systemd **user** unit) sends the popup via `notify-rust` (zbus) with `notify-send` fallback. Headless → log only. See §9.
 4. **Sanity filter added (vnStat lesson).** Counter resets/PPPoE flaps + 32/64-bit wrap confusion cause phantom GBs (vnStat issues #40/#224/#234). We add `max_rate_mbit` per-iface sanity + counter-width detection + RTC/TimeSyncWait on boot. See §7.
-5. **Subnet defaults corrected for 2026 reality.** Added Tailscale/CGNAT rule: `100.64.0.0/10` NOT in default LAN (ISP CGNAT = WAN); `tailscale0` interface forced to LAN + `classify_tailscale_as_lan=true`. Docker `172.17/16`, k8s, ULA `fc00::/7`, link-local included. Multicast/broadcast → LAN (documented). See §5.
+5. **Subnet defaults corrected for 2026 reality.** Added Tailscale/CGNAT rule: `100.64.0.0/10` NOT in default LAN (ISP CGNAT = WAN); `tailscale0` interface forced to LAN via `force_lan_ifaces`. Docker `172.17/16`, k8s, ULA `fc00::/7`, link-local included. Multicast/broadcast → LAN (documented). See §5.
 6. **Storage PRAGMA stack pinned.** `WAL + synchronous=NORMAL + busy_timeout=5000 + cache_size=-64000 + temp_store=MEMORY + foreign_keys=ON`, single writer, `BEGIN IMMEDIATE`, short txns. Backup via `VACUUM INTO`, never file copy. See §8.
 7. **M2 per-process path chosen: Aya eBPF (deferred), not ss-polling.** `/proc` inode→PID mapping is racy (misses short flows, `unknown TCP` bucket — nethogs/bandwhich caveat). Precise path is Aya `cgroup_skb`/TC hooks (production-proven 2026: bpfman, Pulsar, mitmproxy_rs) but needs nightly + BTF + extra crates. Stays M2 opt-in. See §12.
 8. **Packaging pinned: musl static + deb/rpm + cargo.** `x86_64-unknown-linux-musl`, `rusqlite bundled` (SQLite 3.53.2), `rustls` (no openssl), `cargo-deb`/`cargo-generate-rpm` pattern (stgit precedent). Verify with `ldd → not a dynamic executable`. See §11.
@@ -73,8 +73,7 @@ Single Linux power-user/dev. Acceptance:
 ```toml
 lan_subnets = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fe80::/10", "fc00::/7"]
 # 100.64.0.0/10 (CGNAT) deliberately EXCLUDED: ISP CGNAT = WAN.
-classify_tailscale_as_lan = true   # traffic on iface tailscale0* counted LAN regardless of 100.x
-force_lan_ifaces = ["tailscale0*", "zt*"]  # zerotier etc.
+force_lan_ifaces = ["tailscale0*", "zt*"]  # traffic on iface tailscale0* counted LAN regardless of 100.x
 exclude_ifaces = ["lo", "docker*", "veth*", "br-*", "virbr*"]
 # multicast 224.0.0.0/4 + broadcast + lo → counted LAN/not-WAN, documented; loopback excluded from TOTAL by default
 ```
@@ -180,7 +179,6 @@ timezone = "local"          # local | utc
 week_start = "monday"
 exclude_ifaces = ["lo", "docker*", "veth*", "br-*", "virbr*"]
 lan_subnets = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fe80::/10", "fc00::/7"]
-classify_tailscale_as_lan = true
 force_lan_ifaces = ["tailscale0*", "zt*"]
 retention_days_raw = 30
 retention_days_hourly = 365

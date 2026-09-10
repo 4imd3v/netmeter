@@ -74,7 +74,6 @@ pub fn run(cfg: Config) -> Result<()> {
     } else {
         None
     };
-    let mut proc_last: HashMap<String, (u64, u64)> = HashMap::new();
     let mut last_tick = Instant::now();
     let mut last_rollup = Instant::now() - Duration::from_secs(3600);
     let mut last_retain = Instant::now();
@@ -199,29 +198,33 @@ pub fn run(cfg: Config) -> Result<()> {
                     ins.execute(params![now_wall, p.iface, p.rx, p.tx, lrx, ltx])?;
                 }
             }
-            // always-on per-app recording: fold capture deltas into current hour
-            if let Some(rec) = proc_rec.as_mut() {
-                rec.ensure_running(&cfg.exclude_ifaces);
-                let cur = rec.take();
-                if !cur.is_empty() {
-                    let hour = db::floor_hour(now_wall, tz_local);
+            tx.commit()?;
+            check_budget(&conn, &cfg, tz_local)?;
+        }
+
+        // Always-on per-app recording: `drain_deltas()` returns bytes since the
+        // last tick (capture keeps appending to a fresh map), so insert directly.
+        // Runs even when `per` is empty — idle TOTAL ticks must not starve it.
+        if let Some(rec) = proc_rec.as_mut() {
+            rec.ensure_running(&cfg.exclude_ifaces);
+            let cur = rec.drain_deltas();
+            if !cur.is_empty() {
+                let hour = db::floor_hour(now_wall, tz_local);
+                let tx = conn.unchecked_transaction()?;
+                {
                     let mut pins = tx.prepare(
                         "INSERT INTO proc_hourly(ts_hour,comm,rx,tx) VALUES(?,?,?,?)
                          ON CONFLICT(ts_hour,comm) DO UPDATE SET rx=rx+excluded.rx, tx=tx+excluded.tx",
                     )?;
                     for (comm, (rx, tx)) in &cur {
-                        let (prx, ptx) = proc_last.get(comm).copied().unwrap_or((0, 0));
-                        let (dr, dt) =
-                            (rx.saturating_sub(prx) as i64, tx.saturating_sub(ptx) as i64);
+                        let (dr, dt) = (*rx as i64, *tx as i64);
                         if dr > 0 || dt > 0 {
                             pins.execute(params![hour, comm, dr, dt])?;
                         }
                     }
-                    proc_last = cur;
                 }
+                tx.commit()?;
             }
-            tx.commit()?;
-            check_budget(&conn, &cfg, tz_local)?;
         }
 
         if last_rollup.elapsed() > Duration::from_secs(3600) {

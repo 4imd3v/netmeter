@@ -195,8 +195,8 @@ pub fn account(frame: &[u8], owners: &Owners, local: &[IpAddr], cum: &mut Cum) {
 // ---------- always-on daemon recorder ----------
 
 /// Continuous capture thread feeding comm-keyed byte counters.
-/// The daemon drains deltas via [`take`](ProcRecorder::take) each tick and
-/// upserts them into `proc_hourly` — one writer, no IPC.
+/// The daemon drains deltas via [`drain_deltas`](ProcRecorder::drain_deltas)
+/// each tick and upserts them into `proc_hourly` — one writer, no IPC.
 pub struct ProcRecorder {
     cum: Arc<Mutex<HashMap<String, (u64, u64)>>>,
     handle: Option<std::thread::JoinHandle<()>>,
@@ -225,8 +225,10 @@ impl ProcRecorder {
         }
     }
 
-    /// Take the full cumulative map (capture keeps appending to a fresh one).
-    pub fn take(&self) -> HashMap<String, (u64, u64)> {
+    /// Drain deltas accumulated since the last call (capture keeps appending
+    /// to a fresh map). The returned values are already per-interval deltas —
+    /// insert them directly, do NOT diff against the previous drain.
+    pub fn drain_deltas(&self) -> HashMap<String, (u64, u64)> {
         std::mem::take(&mut *self.cum.lock().unwrap())
     }
 
@@ -284,6 +286,11 @@ impl ProcRecorder {
                 }
                 if last_snap.elapsed() > Duration::from_secs(15) {
                     owners = snapshot();
+                    tracing::debug!(
+                        "proc owners refresh: {} endpoints, {} comms",
+                        owners.by_ep.len(),
+                        owners.comm.len()
+                    );
                     last_snap = Instant::now();
                 }
                 if last_flush.elapsed() > Duration::from_secs(1) || cum.len() > 5000 {
@@ -319,7 +326,10 @@ fn open_all(exclude: &[String]) -> Vec<(String, Vec<IpAddr>, Box<dyn DataLinkRec
         };
         match datalink::channel(&ni, cfg) {
             Ok(Channel::Ethernet(_, rx)) => out.push((ni.name, ips, rx)),
-            Ok(_) => continue,
+            Ok(_) => {
+                tracing::debug!("proc capture: skipping {} (non-Ethernet channel)", ni.name);
+                continue;
+            }
             Err(e) => {
                 tracing::warn!("proc capture: cannot open {} ({e})", ni.name);
                 continue;
@@ -371,5 +381,27 @@ mod tests {
         account(&f, &owners, &[], &mut cum);
         let rx = cum.get(&0).map(|(_, rx, _)| *rx).unwrap_or(0);
         assert_eq!(rx, f.len() as u64);
+    }
+
+    #[test]
+    fn drain_returns_deltas_insert_directly() {
+        // Regression: daemon used to diff drains (`cur - proc_last`), but
+        // `drain_deltas()` empties the map, so the second drain is only the
+        // increment — diffing saturates to 0 and drops all traffic.
+        let rec = ProcRecorder {
+            cum: Arc::new(Mutex::new(HashMap::from([("ff".to_string(), (1000, 200))]))),
+            handle: None,
+        };
+        let first = rec.drain_deltas();
+        assert_eq!(first.get("ff"), Some(&(1000, 200)));
+        // capture thread appends to the fresh map after a drain
+        rec.cum.lock().unwrap().insert("ff".to_string(), (500, 100));
+        let second = rec.drain_deltas();
+        assert_eq!(second.get("ff"), Some(&(500, 100)));
+        // daemon must insert the drain as-is; the old diff dropped it:
+        let (prx, _ptx) = first.get("ff").copied().unwrap_or((0, 0));
+        let (rx, _tx) = second.get("ff").copied().unwrap_or((0, 0));
+        assert_eq!(rx.saturating_sub(prx), 0, "old diff logic zeroes deltas");
+        assert!(rx > 0, "direct insert keeps the delta");
     }
 }

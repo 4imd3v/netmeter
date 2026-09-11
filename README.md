@@ -1,6 +1,45 @@
-# NetMeter — local-first LAN/WAN/TOTAL bandwidth meter (Linux)
+# NetMeter — know where your gigabytes went (Linux)
 
-Single static Rust binary. Kernel counters only, no packet sniffing.
+NetMeter is a local-first bandwidth meter for Linux: a headless daemon records
+usage in the background, and a single static Rust binary answers "how much did
+this machine use — LAN vs WAN vs TOTAL — and which apps used it?" No cloud, no
+telemetry, no DPI — just kernel counters plus lightweight per-app accounting,
+all stored in a local SQLite database.
+
+```sh
+$ netmeter show --period day
+DATE                   DOWN         UP      TOTAL          LAN ↓/↑          WAN ↓/↑
+2026-09-11          1.8 GiB   83.3 MiB    1.9 GiB          0 B/0 B 1.8 GiB/83.3 MiB
+Budget (daily): 1.9 GiB/2.0 GiB █████████░ 96%
+
+$ netmeter top-apps
+APP                            DOWN         UP      TOTAL  today
+helium                    531.6 KiB  242.3 KiB  773.9 KiB  ██████████
+zed-editor                 62.2 KiB   56.3 KiB  118.5 KiB  ██░░░░░░░░
+unknown                    90.9 KiB   43.2 KiB  134.1 KiB  ██░░░░░░░░
+```
+
+## Features
+
+- **LAN vs WAN vs TOTAL on every view** — TOTAL from `/proc/net/dev`, LAN from
+  accept-only nftables counters, `WAN = TOTAL − LAN`. Degrades honestly to
+  TOTAL-only where nft isn't available (`status` tells you).
+- **Per-app history** — `top-apps --period day|week|month` shows which processes
+  used what; `top-proc` is the same data as an auto-refreshing dashboard.
+  Recorded by the daemon, so viewers need no privileges (short flows land in
+  `unknown` — best effort, documented).
+- **Live dashboard** — `live` redraws every second: per-iface rates, sparklines,
+  today/week/month strips, budget gauge, and today's top apps side by side.
+- **Boring-in-a-good-way daemon** — systemd unit with least-privilege ambient
+  capabilities, autostart on boot, survives reboot/sleep/interface flaps without
+  phantom gigabytes (wrap/reset/spike sanity filter on every sample).
+- **Budgets that nudge you** — configure `budget_gb` + `budget_period`, and a
+  per-user agent pops a desktop notification at 80%/100%.
+- **Local-first & private** — offline, <1% CPU, tiny disk footprint. The DB holds
+  byte counts plus interface/process names only — never payloads, hosts, or URLs.
+- **Plays well with others** — one-shot vnStat history import, CSV/JSON export,
+  stable `--json` API (`api_version`), shell completions, and a man page.
+
 Spec: `PRD.md`. License: MIT (`LICENSE-MIT`).
 
 ## Install (needs root for daemon + LAN/WAN split)

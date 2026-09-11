@@ -135,6 +135,25 @@ fn l4_ports(proto: pnet::packet::ip::IpNextHeaderProtocol, l4: &[u8]) -> Option<
     }
 }
 
+/// Drain one receiver fully; returns true when it errored (caller reopens all).
+/// Draining (not one `next()` per round-robin turn) keeps busy interfaces
+/// from starving behind idle ones' poll timeout.
+fn drain_one(
+    rx: &mut dyn DataLinkReceiver,
+    owners: &Owners,
+    local: &[IpAddr],
+    cum: &mut Cum,
+) -> bool {
+    use std::io::ErrorKind::{TimedOut, WouldBlock};
+    loop {
+        match rx.next() {
+            Ok(frame) => account(frame, owners, local, cum),
+            Err(e) if e.kind() == TimedOut || e.kind() == WouldBlock => return false,
+            Err(_) => return true,
+        }
+    }
+}
+
 pub fn account(frame: &[u8], owners: &Owners, local: &[IpAddr], cum: &mut Cum) {
     let Some(eth) = EthernetPacket::new(frame) else {
         return;
@@ -265,18 +284,9 @@ impl ProcRecorder {
                     .collect();
                 let mut dead = false;
                 for (_, _, rx) in receivers.iter_mut() {
-                    match rx.next() {
-                        Ok(frame) => account(frame, &owners, &locals, &mut cum),
-                        Err(e)
-                            if e.kind() == std::io::ErrorKind::TimedOut
-                                || e.kind() == std::io::ErrorKind::WouldBlock =>
-                        {
-                            continue;
-                        }
-                        Err(_) => {
-                            dead = true;
-                            break;
-                        }
+                    if drain_one(rx.as_mut(), &owners, &locals, &mut cum) {
+                        dead = true;
+                        break;
                     }
                 }
                 if dead {
@@ -321,7 +331,11 @@ fn open_all(exclude: &[String]) -> Vec<(String, Vec<IpAddr>, Box<dyn DataLinkRec
         }
         let ips: Vec<IpAddr> = ni.ips.iter().map(|n| n.ip()).collect();
         let cfg = datalink::Config {
-            read_timeout: Some(Duration::from_millis(200)),
+            // Short poll so idle ifaces don't pace the loop; busy ifaces are
+            // fully drained each iteration (see launch loop). 64 KiB recv
+            // buffer avoids truncation (pnet default is 4 KiB).
+            read_timeout: Some(Duration::from_millis(10)),
+            read_buffer_size: 64 * 1024,
             ..Default::default()
         };
         match datalink::channel(&ni, cfg) {
@@ -385,7 +399,6 @@ mod tests {
 
     #[test]
     fn drain_returns_deltas_insert_directly() {
-        // Regression: daemon used to diff drains (`cur - proc_last`), but
         // `drain_deltas()` empties the map, so the second drain is only the
         // increment — diffing saturates to 0 and drops all traffic.
         let rec = ProcRecorder {
@@ -403,5 +416,66 @@ mod tests {
         let (rx, _tx) = second.get("ff").copied().unwrap_or((0, 0));
         assert_eq!(rx.saturating_sub(prx), 0, "old diff logic zeroes deltas");
         assert!(rx > 0, "direct insert keeps the delta");
+    }
+
+    /// Stub receiver: yields queued frames, then `TimedOut` like an idle
+    /// interface (or a hard error when `fail` is set).
+    struct StubRx {
+        frames: std::collections::VecDeque<Vec<u8>>,
+        buf: Vec<u8>,
+        fail: bool,
+    }
+    impl DataLinkReceiver for StubRx {
+        fn next(&mut self) -> std::io::Result<&[u8]> {
+            if self.fail {
+                return Err(std::io::Error::other("boom"));
+            }
+            match self.frames.pop_front() {
+                Some(f) => {
+                    self.buf = f;
+                    Ok(&self.buf)
+                }
+                None => Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "idle")),
+            }
+        }
+    }
+
+    fn tcp_frame() -> Vec<u8> {
+        let mut f = vec![0u8; 14 + 20 + 20];
+        f[12] = 0x08;
+        f[13] = 0x00; // IPv4 ethertype
+        f[14] = 0x45; // version+IHL
+        f[23] = 6; // TCP
+        f[14 + 12..14 + 16].copy_from_slice(&[1, 2, 3, 4]);
+        f[14 + 16..14 + 20].copy_from_slice(&[5, 6, 7, 8]);
+        f
+    }
+
+    #[test]
+    fn drain_one_empties_idle_receiver() {
+        // Regression for the 0.6%-capture bug: one `next()` per round-robin
+        // turn starved busy ifaces behind idle ones' poll timeout. `drain_one`
+        // must consume everything queued before returning.
+        let owners = Owners {
+            by_ep: HashMap::new(),
+            comm: HashMap::new(),
+        };
+        let mut rx = StubRx {
+            frames: vec![tcp_frame(), tcp_frame(), tcp_frame()].into(),
+            buf: vec![],
+            fail: false,
+        };
+        let mut cum = Cum::new();
+        assert!(!drain_one(&mut rx, &owners, &[], &mut cum));
+        assert!(rx.frames.is_empty(), "all queued frames must be consumed");
+        let got: u64 = cum.values().map(|(_, rx, _)| rx).sum();
+        assert_eq!(got, 3 * tcp_frame().len() as u64);
+        // erroring receiver reports dead so the loop reopens all
+        let mut bad = StubRx {
+            frames: Default::default(),
+            buf: vec![],
+            fail: true,
+        };
+        assert!(drain_one(&mut bad, &owners, &[], &mut Cum::new()));
     }
 }

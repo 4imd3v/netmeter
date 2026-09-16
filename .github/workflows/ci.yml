@@ -1,0 +1,16 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build + lint + test
+        run: make check
+      - name: Lint installer
+        run: shellcheck install.sh

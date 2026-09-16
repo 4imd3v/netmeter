@@ -14,6 +14,11 @@ use rusqlite::params;
 
 use config::Config;
 
+/// Where the bundled systemd units expect the binary (see
+/// `packaging/netmeter.service`). `daemon install` copies the running binary
+/// here so `cargo install` / `curl | sh` installs start the service too.
+const INSTALL_BIN: &str = "/usr/bin/netmeter";
+
 #[derive(Debug, Clone, ValueEnum)]
 enum Period {
     Hour,
@@ -761,7 +766,29 @@ fn run_systemctl(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+/// Copy the running binary to [`INSTALL_BIN`] when invoked from elsewhere
+/// (e.g. `~/.cargo/bin`), because the unit's `ExecStart` is a fixed path.
+fn install_self() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let cur = std::env::current_exe().context("resolve own path")?;
+    let dest = std::path::Path::new(INSTALL_BIN);
+    if cur.as_path() == dest {
+        return Ok(());
+    }
+    std::fs::copy(&cur, dest).with_context(|| {
+        format!(
+            "copy {} -> {INSTALL_BIN} failed (run with sudo, or: sudo install -m755 {} {INSTALL_BIN})",
+            cur.display(),
+            cur.display()
+        )
+    })?;
+    std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755))?;
+    println!("installed {} -> {INSTALL_BIN}", cur.display());
+    Ok(())
+}
+
 fn daemon_install(cfg: &Config) -> Result<()> {
+    install_self()?;
     // nft table (needs root)
     if let Err(e) = capture::install_nft(&cfg.lan_subnets) {
         eprintln!(
@@ -843,6 +870,8 @@ fn sudo_user_home() -> Option<std::path::PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use super::INSTALL_BIN;
+
     #[test]
     fn embedded_units_match_packaging() {
         for (embedded, path) in [
@@ -856,8 +885,8 @@ mod tests {
             ),
         ] {
             assert!(
-                embedded.contains("ExecStart=/usr/bin/netmeter"),
-                "{path} missing ExecStart"
+                embedded.contains(&format!("ExecStart={INSTALL_BIN}")),
+                "{path} ExecStart must match INSTALL_BIN ({INSTALL_BIN})"
             );
             assert!(
                 !embedded.contains("{{") && !embedded.contains("}}"),

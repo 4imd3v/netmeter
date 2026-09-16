@@ -42,18 +42,45 @@ unknown                    90.9 KiB   43.2 KiB  134.1 KiB  ██░░░░░
 
 Spec: `PRD.md`. License: MIT (`LICENSE-MIT`).
 
-## Install (needs root for daemon + LAN/WAN split)
+## Install
+
+Prebuilt static (musl) binaries for x86_64 and aarch64 — no Rust toolchain
+needed. The installer verifies the release checksum, installs the binary,
+and sets up the systemd service (creates the `netmeter` user, nft table,
+units; needs root):
 
 ```sh
-cargo install --locked --path .
-sudo netmeter daemon install   # creates netmeter user, nft table, systemd units, starts service
+curl -fsSL https://raw.githubusercontent.com/4imd3v/netmeter/main/install.sh | sh
 ```
 
-Without root it still works in TOTAL-only mode (no LAN/WAN split):
+Prefer to read before running:
 
 ```sh
-cargo run -- status
-NETMETER_DATABASE_PATH=~/.local/share/netmeter.db cargo run -- daemon run
+curl -fsSLO https://raw.githubusercontent.com/4imd3v/netmeter/main/install.sh
+sh install.sh --help        # --version, --prefix, --user, --no-daemon
+sh install.sh
+```
+
+Other channels:
+
+```sh
+cargo install netmeter             # crates.io (needs a Rust toolchain)
+# .deb / .rpm: attach to GitHub Releases; AUR: packaging/aur/PKGBUILD
+```
+
+From a source checkout:
+
+```sh
+make install                       # cargo install --locked --path .
+make deploy                        # install to /usr/bin + restart the daemon
+make check                         # fmt + clippy -D warnings + tests
+```
+
+Without root it still works in TOTAL-only mode (no LAN/WAN split, no system
+service):
+
+```sh
+sh install.sh --user               # ~/.local/bin, run `netmeter daemon run`
 ```
 
 ## Use
@@ -106,17 +133,25 @@ cargo install cargo-generate-rpm && cargo generate-rpm  # needs rpmbuild
 - deb: binary + both systemd units + `/etc/netmeter/config.toml` (conffile) +
   man page; postinst creates the `netmeter` user. Depends: systemd.
   Recommends: nftables (LAN/WAN split), libnotify-bin (fallback notify).
-- AUR: `packaging/aur/PKGBUILD` (+ `.install` hook). Point `url=` at your repo.
+- AUR: `packaging/aur/PKGBUILD` (+ `.install` hook).
 - User-agent unit ships at `/usr/share/netmeter/user/`; enable per desktop user
   (copy/link into `~/.config/systemd/user/` first if needed).
 
-## Release (musl static + deb/rpm)
+## Release (maintainers)
+
+Push a `v*` tag — `.github/workflows/release.yml` builds static musl binaries
+(x86_64 + aarch64), verifies they're not dynamically linked, attaches
+`netmeter-<target>.tar.gz` + `SHA256SUMS` to the GitHub Release, publishes to
+crates.io when `CARGO_REGISTRY_TOKEN` is set, then attaches `.deb`/`.rpm`.
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+Local build (needs `musl-tools`):
 
 ```sh
 rustup target add x86_64-unknown-linux-musl
-cargo build --release --target x86_64-unknown-linux-musl
+cargo build --release --locked --target x86_64-unknown-linux-musl
 ldd target/x86_64-unknown-linux-musl/release/netmeter  # → not a dynamic executable
-cargo install cargo-deb cargo-generate-rpm
-cargo deb --target=x86_64-unknown-linux-musl
-cargo generate-rpm --target=x86_64-unknown-linux-musl
 ```

@@ -190,7 +190,7 @@ budget_basis = "total"      # total | wan
 notify_on_budget = true
 ```
 - Build: Rust stable, `rusqlite{bundled}`, `rustls` (never openssl-vendored), `ratatui/crossterm`, `clap{derive}`, `serde/serde_json`, `notify-rust`, `tracing`, `directories`, `jiff` (dates). MSRV = clap's (1.74+) floor.
-- Release: `x86_64-unknown-linux-musl` static (`rustup target add`, `linker=musl-gcc`, `strip`, LTO), verify `ldd → not a dynamic executable`. Artifacts: musl tarball + `.deb` (`cargo-deb`) + `.rpm` (`cargo-generate-rpm`) + `cargo install --locked netmeter`. AUR recipe M2. x86_64 + aarch64 (via `cross`/BlackDex images in CI).
+- Release: tag `v*` → GitHub Actions (`.github/workflows/release.yml`) builds `x86_64-unknown-linux-musl` + `aarch64-unknown-linux-musl` static (`musl-tools`, `linker=musl-gcc`, `strip`, LTO), verifies `ldd → not a dynamic executable`, packages `netmeter-$TARGET.tar.gz` + `SHA256SUMS`, creates the GitHub Release, then attaches `.deb` (`cargo-deb`) + `.rpm` (`cargo-generate-rpm`); `cargo publish` runs when `CARGO_REGISTRY_TOKEN` is set. **Primary channel: `install.sh` (curl|sh)** — verifies the checksum, installs the binary + man page, runs `daemon install`. `daemon install` copies its own binary to `/usr/bin/netmeter` (unit `ExecStart` is fixed) so cargo/curl installs start the service. AUR `packaging/aur/PKGBUILD`. x86_64 native musl + aarch64 on GitHub arm runners; `cross`/BlackDex fallback.
 - Install footprint: binary ~5–10MB stripped, deb/rpm ship binary + system unit + user-agent unit + default configs. `daemon install` creates `netmeter` user, table, units, enables both (`--system` + `--user` note: user unit enabled per-user on first login).
 
 ## 12. Roadmap (no build yet)

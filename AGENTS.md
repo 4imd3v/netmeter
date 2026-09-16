@@ -43,6 +43,11 @@ Read this before changing code. Goal: correct diffs without hallucinated APIs or
 - No blocking work inside draw closures. New visible colors must read on dark terminals (no `DarkGray` + dim).
 - Daemon remains the only recorder; TUIs read.
 
+## Release & distribution
+
+- Primary channel is `install.sh` (curl|sh) against GitHub Releases; tags `v*` trigger `.github/workflows/release.yml` (musl tarballs + `SHA256SUMS` + `.deb`/`.rpm`; `cargo publish` only when `CARGO_REGISTRY_TOKEN` is set). PRs run `make check` + `shellcheck install.sh` (`.github/workflows/ci.yml`).
+- `src/main.rs::INSTALL_BIN` (`/usr/bin/netmeter`) must match the units' `ExecStart` — the test enforces it. `daemon install` copies the running binary there so cargo/curl installs work; don't change one without the other.
+
 ## Docs
 
 - Update `README.md` for user-facing changes, `man/netmeter.1` after CLI changes (`netmeter manpage > man/netmeter.1`), `PRD.md` for decision changes.

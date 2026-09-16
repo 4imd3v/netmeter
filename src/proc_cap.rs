@@ -261,22 +261,41 @@ impl ProcRecorder {
             let mut cum: Cum = HashMap::new();
             let mut last_flush = Instant::now();
             let mut receivers: Vec<(String, Vec<IpAddr>, Box<dyn DataLinkReceiver>)> = vec![];
+            let mut last_open = Instant::now();
             loop {
-                if receivers.is_empty() {
-                    receivers = open_all(&exclude);
+                // Re-resolve interfaces periodically: USB tether / VPN ifaces come
+                // and go (and get a new name on reconnect) after the daemon starts.
+                // A fixed startup set silently captures the wrong pipe forever.
+                if receivers.is_empty() || last_open.elapsed() > Duration::from_secs(15) {
+                    last_open = Instant::now();
+                    let want = eligible(&exclude);
+                    let have: Vec<String> = receivers.iter().map(|(n, _, _)| n.clone()).collect();
+                    let want_names: Vec<String> = want.iter().map(|(n, _)| n.clone()).collect();
+                    if set_changed(&have, &want_names) {
+                        receivers = open_all(&exclude);
+                        tracing::info!(
+                            "proc capture on: {}",
+                            receivers
+                                .iter()
+                                .map(|(n, _, _)| n.clone())
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        );
+                    } else {
+                        // same ifaces: refresh IPs in place (DHCP renew) — no socket churn
+                        for (name, ips) in &want {
+                            if let Some(r) = receivers.iter_mut().find(|(n, _, _)| n == name) {
+                                r.1 = ips.clone();
+                            }
+                        }
+                    }
                     if receivers.is_empty() {
                         // no eligible interface (or no perms) — retry later, don't spin
+                        tracing::warn!("proc capture: no eligible interface — retrying in 30s");
                         std::thread::sleep(Duration::from_secs(30));
+                        last_open = Instant::now();
                         continue;
                     }
-                    tracing::info!(
-                        "proc capture on: {}",
-                        receivers
-                            .iter()
-                            .map(|(n, _, _)| n.clone())
-                            .collect::<Vec<_>>()
-                            .join(",")
-                    );
                 }
                 let locals: Vec<IpAddr> = receivers
                     .iter()
@@ -320,15 +339,35 @@ impl ProcRecorder {
     }
 }
 
+/// Eligible capture interfaces: up, non-loopback, not excluded.
+fn candidates(exclude: &[String]) -> Vec<datalink::NetworkInterface> {
+    datalink::interfaces()
+        .into_iter()
+        .filter(|ni| ni.is_up() && !ni.is_loopback())
+        .filter(|ni| !exclude.iter().any(|p| config::glob_match(p, &ni.name)))
+        .collect()
+}
+
+/// (name, ips) of eligible interfaces — no sockets, used to detect set changes.
+fn eligible(exclude: &[String]) -> Vec<(String, Vec<IpAddr>)> {
+    candidates(exclude)
+        .into_iter()
+        .map(|ni| (ni.name, ni.ips.iter().map(|n| n.ip()).collect()))
+        .collect()
+}
+
+/// True when the eligible interface name set differs from the open receivers'.
+fn set_changed(have: &[String], want: &[String]) -> bool {
+    let mut a = have.to_vec();
+    let mut b = want.to_vec();
+    a.sort();
+    b.sort();
+    a != b
+}
+
 fn open_all(exclude: &[String]) -> Vec<(String, Vec<IpAddr>, Box<dyn DataLinkReceiver>)> {
     let mut out = vec![];
-    for ni in datalink::interfaces() {
-        if !ni.is_up() || ni.is_loopback() {
-            continue;
-        }
-        if exclude.iter().any(|p| config::glob_match(p, &ni.name)) {
-            continue;
-        }
+    for ni in candidates(exclude) {
         let ips: Vec<IpAddr> = ni.ips.iter().map(|n| n.ip()).collect();
         let cfg = datalink::Config {
             // Short poll so idle ifaces don't pace the loop; busy ifaces are
@@ -477,5 +516,25 @@ mod tests {
             fail: true,
         };
         assert!(drain_one(&mut bad, &owners, &[], &mut Cum::new()));
+    }
+
+    #[test]
+    fn set_changed_detects_hotplug() {
+        // Regression: capture set was resolved once at startup, so a tether
+        // iface that appears after the daemon starts was never captured.
+        let have = ["enp3s0".to_string()];
+        assert!(!set_changed(&have, &["enp3s0".to_string()]));
+        // order-insensitive
+        assert!(!set_changed(
+            &["a".to_string(), "b".to_string()],
+            &["b".to_string(), "a".to_string()]
+        ));
+        // a tether iface came up → reopen
+        assert!(set_changed(
+            &have,
+            &["enp3s0".to_string(), "enx46dd59084173".to_string()]
+        ));
+        // iface removed → reopen
+        assert!(set_changed(&have, &[]));
     }
 }

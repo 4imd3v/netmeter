@@ -135,9 +135,15 @@ fn l4_ports(proto: pnet::packet::ip::IpNextHeaderProtocol, l4: &[u8]) -> Option<
     }
 }
 
-/// Drain one receiver fully; returns true when it errored (caller reopens all).
-/// Draining (not one `next()` per round-robin turn) keeps busy interfaces
-/// from starving behind idle ones' poll timeout.
+/// Most frames drained from one interface per call. On a saturated link the
+/// socket never goes quiet, so an unbounded drain would starve the outer loop
+/// (flush, owner snapshot, interface re-resolve, other receivers); yielding at
+/// a cap keeps all of those live while still draining in bulk.
+const MAX_DRAIN_FRAMES: usize = 4096;
+
+/// Drain one receiver, up to [`MAX_DRAIN_FRAMES`]; returns true when it
+/// errored (caller reopens all). Draining (not one `next()` per round-robin
+/// turn) keeps busy interfaces from starving behind idle ones' poll timeout.
 fn drain_one(
     rx: &mut dyn DataLinkReceiver,
     owners: &Owners,
@@ -145,13 +151,14 @@ fn drain_one(
     cum: &mut Cum,
 ) -> bool {
     use std::io::ErrorKind::{TimedOut, WouldBlock};
-    loop {
+    for _ in 0..MAX_DRAIN_FRAMES {
         match rx.next() {
             Ok(frame) => account(frame, owners, local, cum),
             Err(e) if e.kind() == TimedOut || e.kind() == WouldBlock => return false,
             Err(_) => return true,
         }
     }
+    false
 }
 
 pub fn account(frame: &[u8], owners: &Owners, local: &[IpAddr], cum: &mut Cum) {
@@ -516,6 +523,31 @@ mod tests {
             fail: true,
         };
         assert!(drain_one(&mut bad, &owners, &[], &mut Cum::new()));
+    }
+
+    #[test]
+    fn drain_one_yields_after_cap() {
+        // Saturated link: socket never goes quiet. drain_one must still yield
+        // at the cap (returning to flush/snapshot/other ifaces), without
+        // reporting the receiver dead, and resume on the next call.
+        let owners = Owners {
+            by_ep: HashMap::new(),
+            comm: HashMap::new(),
+        };
+        let total = MAX_DRAIN_FRAMES + 10;
+        let mut rx = StubRx {
+            frames: (0..total).map(|_| tcp_frame()).collect(),
+            buf: vec![],
+            fail: false,
+        };
+        let mut cum = Cum::new();
+        assert!(!drain_one(&mut rx, &owners, &[], &mut cum));
+        assert_eq!(rx.frames.len(), 10, "must yield exactly at the cap");
+        let got: u64 = cum.values().map(|(_, rx, _)| rx).sum();
+        assert_eq!(got, MAX_DRAIN_FRAMES as u64 * tcp_frame().len() as u64);
+        // next call finishes the remainder
+        assert!(!drain_one(&mut rx, &owners, &[], &mut cum));
+        assert!(rx.frames.is_empty());
     }
 
     #[test]

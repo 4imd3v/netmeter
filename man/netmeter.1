@@ -1,61 +1,93 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH netmeter 1  "netmeter 0.2.0" 
+.TH netmeter 1  "netmeter 0.2.0"
 .SH NAME
 netmeter \- Local\-first LAN/WAN/TOTAL bandwidth meter (Linux)
 .SH SYNOPSIS
 \fBnetmeter\fR [\fB\-h\fR|\fB\-\-help\fR] [\fB\-V\fR|\fB\-\-version\fR] <\fIsubcommands\fR>
 .SH DESCRIPTION
-Local\-first LAN/WAN/TOTAL bandwidth meter (Linux)
+NetMeter records local bandwidth usage in a background daemon and answers questions about TOTAL, LAN, and WAN usage. TOTAL comes from kernel interface counters; LAN is estimated from nftables when available and WAN is derived as TOTAL minus LAN. Use `netmeter status` to check whether the LAN/WAN split is available.
 .SH OPTIONS
 .TP
 \fB\-h\fR, \fB\-\-help\fR
-Print help
+Print help (see a summary with \*(Aq\-h\*(Aq)
 .TP
 \fB\-V\fR, \fB\-\-version\fR
 Print version
 .SH SUBCOMMANDS
 .TP
-netmeter\-live(1)
-Live 1s dashboard (q to quit)
+netmeter live
+Live 1s dashboard (q to quit; no sudo needed)
 .TP
-netmeter\-show(1)
+netmeter show
 Show historical usage
 .TP
-netmeter\-top(1)
-Top talkers by iface or day
+netmeter top
+TOTAL\-only top talkers by iface or day
 .TP
-netmeter\-status(1)
-Daemon + system status
+netmeter status
+Daemon, database, and LAN/WAN split status
 .TP
-netmeter\-config(1)
-Config get/set/path/reset
+netmeter config
+Read or change one configuration key at a time
 .TP
-netmeter\-export(1)
-Export range to csv/json
+netmeter export
+Export raw samples as csv or json
 .TP
-netmeter\-import(1)
-One\-shot vnStat history import (vnstat \-\-json)
+netmeter import
+Import vnStat daily history (runs vnstat \-\-json)
 .TP
-netmeter\-completions(1)
-Shell completions
+netmeter completions
+Generate shell completions
 .TP
-netmeter\-manpage(1)
-Print roff man page to stdout (packaging embeds it)
+netmeter manpage
+Print the root roff man page to stdout
 .TP
-netmeter\-daemon(1)
-Background daemon controls
+netmeter daemon
+System daemon controls: run, start, stop, restart, install, uninstall
 .TP
-netmeter\-top\-apps(1)
-Per\-app usage history from daemon recording (day|week|month)
+netmeter top-apps
+TOTAL\-only per\-app history (day|week|month)
 .TP
-netmeter\-top\-proc(1)
-Per\-app usage dashboard, auto\-refreshing (daemon\-recorded, no sudo needed)
+netmeter top-proc
+TOTAL\-only per\-app dashboard (auto\-refreshing)
 .TP
-netmeter\-user\-agent(1)
-Per\-user budget notifier (runs as systemd \-\-user unit)
-.TP
-netmeter\-help(1)
-Print this message or the help of the given subcommand(s)
+netmeter user-agent
+Per\-user budget notifier (normally run as a systemd user unit)
+.SH EXTRA
+
+COMMON WORKFLOWS
+
+Recorder and dashboards:
+  sudo netmeter daemon install
+  netmeter status
+  netmeter live
+
+History and top talkers:
+  netmeter show \-\-period day
+  netmeter show \-\-period month \-\-from 2026\-09\-01 \-\-json
+  netmeter top \-\-by iface
+  netmeter top\-apps \-\-period week
+  netmeter top\-proc \-\-period day
+
+Configuration (one key per command):
+  netmeter config path
+  netmeter config get [KEY]
+  sudo netmeter config set budget_gb 2
+  sudo netmeter config set budget_period month
+  netmeter config reset
+
+Budget notifications:
+  systemctl \-\-user enable \-\-now netmeter\-agent
+
+Data movement:
+  netmeter export \-\-from 2026\-09\-01 \-\-to 2026\-09\-07 \-\-format json
+  netmeter import \-\-from vnstat
+
+NOTES
+
+`config set` accepts exactly one <KEY> <VALUE> pair; run it once per key.
+`\-\-json` is command\-specific. `show`, `status`, and `top\-apps` include
+`api_version`; `export \-\-format json` writes a bare JSON array.
 .SH VERSION
 v0.2.0

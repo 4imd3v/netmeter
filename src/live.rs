@@ -383,7 +383,7 @@ fn live_loop(
             } else {
                 f.render_widget(
                     Paragraph::new(format!(
-                        " month {} (▼{} ▲{}) │ LAN {}/{} │ WAN {}/{} │ `netmeter config set budget_gb 50 budget_period month` for a budget bar",
+                        " month {} (▼{} ▲{}) │ LAN {}/{} │ WAN {}/{} │ `sudo netmeter config set budget_gb 50` for a budget bar",
                         fmtx::fmt_bytes(month_used, dec),
                         fmtx::fmt_bytes(mrx, dec),
                         fmtx::fmt_bytes(mtx, dec),

@@ -9,7 +9,7 @@ mod top_proc;
 mod user_agent;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use rusqlite::params;
 
 use config::Config;
@@ -18,6 +18,63 @@ use config::Config;
 /// `packaging/netmeter.service`). `daemon install` copies the running binary
 /// here so `cargo install` / `curl | sh` installs start the service too.
 const INSTALL_BIN: &str = "/usr/bin/netmeter";
+
+const ROOT_LONG_ABOUT: &str = "NetMeter records local bandwidth usage in a background daemon and \
+answers questions about TOTAL, LAN, and WAN usage. TOTAL comes from kernel interface counters; \
+LAN is estimated from nftables when available and WAN is derived as TOTAL minus LAN. Use \
+`netmeter status` to check whether the LAN/WAN split is available.";
+
+const COMMON_WORKFLOWS: &str = r#"
+COMMON WORKFLOWS
+
+Recorder and dashboards:
+  sudo netmeter daemon install
+  netmeter status
+  netmeter live
+
+History and top talkers:
+  netmeter show --period day
+  netmeter show --period month --from 2026-09-01 --json
+  netmeter top --by iface
+  netmeter top-apps --period week
+  netmeter top-proc --period day
+
+Configuration (one key per command):
+  netmeter config path
+  netmeter config get [KEY]
+  sudo netmeter config set budget_gb 2
+  sudo netmeter config set budget_period month
+  netmeter config reset
+
+Budget notifications:
+  systemctl --user enable --now netmeter-agent
+
+Data movement:
+  netmeter export --from 2026-09-01 --to 2026-09-07 --format json
+  netmeter import --from vnstat
+
+NOTES
+
+`config set` accepts exactly one <KEY> <VALUE> pair; run it once per key.
+`--json` is command-specific. `show`, `status`, and `top-apps` include
+`api_version`; `export --format json` writes a bare JSON array.
+"#;
+
+const MAN_SUBCOMMANDS: &[&str] = &[
+    "live",
+    "show",
+    "top",
+    "status",
+    "config",
+    "export",
+    "import",
+    "completions",
+    "manpage",
+    "daemon",
+    "top-apps",
+    "top-proc",
+    "user-agent",
+];
 
 #[derive(Debug, Clone, ValueEnum)]
 enum Period {
@@ -40,7 +97,13 @@ enum TopBy {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "netmeter", version, about = "Local-first LAN/WAN/TOTAL bandwidth meter (Linux)", long_about = None)]
+#[command(
+    name = "netmeter",
+    version,
+    about = "Local-first LAN/WAN/TOTAL bandwidth meter (Linux)",
+    long_about = ROOT_LONG_ABOUT,
+    after_long_help = COMMON_WORKFLOWS
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -48,16 +111,22 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// Live 1s dashboard (q to quit)
+    #[command(
+        about = "Live 1s dashboard (q to quit; no sudo needed)",
+        long_about = "Live 1s dashboard with per-interface rates, sparklines, budget status, and top apps. It reads counters directly and does not require privileges."
+    )]
     Live {
         #[arg(long)]
         iface: Option<String>,
     },
-    /// Show historical usage
+    #[command(
+        about = "Show historical usage",
+        long_about = "Show historical usage. LAN/WAN columns are shown when split data is available; top commands are TOTAL-only."
+    )]
     Show {
         #[arg(long, value_enum, default_value = "day")]
         period: Period,
-        #[arg(long)]
+        #[arg(long, value_name = "YYYY-MM-DD")]
         from: Option<String>,
         #[arg(long)]
         iface: Option<String>,
@@ -66,49 +135,68 @@ enum Cmd {
         #[arg(long)]
         no_color: bool,
     },
-    /// Top talkers by iface or day
+    #[command(
+        about = "TOTAL-only top talkers by iface or day",
+        long_about = "Rank all-time usage by interface or day. This view is TOTAL-only; it does not split LAN and WAN."
+    )]
     Top {
         #[arg(long, value_enum, default_value = "iface")]
         by: TopBy,
         #[arg(long, default_value_t = 10)]
         limit: usize,
     },
-    /// Daemon + system status
+    #[command(
+        about = "Daemon, database, and LAN/WAN split status",
+        long_about = "Show daemon activity, database location and size, discarded samples, and whether LAN/WAN splitting is currently available or inferred from history."
+    )]
     Status {
         #[arg(long)]
         json: bool,
     },
-    /// Config get/set/path/reset
+    /// Read or change one configuration key at a time
     Config {
         #[command(subcommand)]
         op: ConfigOp,
     },
-    /// Export range to csv/json
+    #[command(
+        about = "Export raw samples as csv or json",
+        long_about = "Export raw sample rows. Both dates are required and inclusive. JSON output is a bare array without api_version."
+    )]
     Export {
-        #[arg(long)]
+        #[arg(long, value_name = "YYYY-MM-DD")]
         from: String,
-        #[arg(long)]
+        #[arg(long, value_name = "YYYY-MM-DD")]
         to: String,
         #[arg(long, value_enum, default_value = "csv")]
         format: OutFmt,
     },
-    /// One-shot vnStat history import (vnstat --json)
+    #[command(
+        about = "Import vnStat daily history (runs vnstat --json)",
+        long_about = "Run vnstat --json (optionally with --db PATH) and import daily rows. Imported LAN values are unknown and stored as zero."
+    )]
     Import {
-        #[arg(long, default_value = "vnstat")]
+        #[arg(
+            long,
+            default_value = "vnstat",
+            help = "ignored; vnstat is the only importer"
+        )]
         from: String,
-        #[arg(long)]
+        #[arg(long, value_name = "VNSTAT_DB")]
         db: Option<String>,
     },
-    /// Shell completions
+    /// Generate shell completions
     Completions { shell: clap_complete::Shell },
-    /// Print roff man page to stdout (packaging embeds it)
+    /// Print the root roff man page to stdout
     Manpage,
-    /// Background daemon controls
+    /// System daemon controls: run, start, stop, restart, install, uninstall
     Daemon {
         #[command(subcommand)]
         op: DaemonOp,
     },
-    /// Per-app usage history from daemon recording (day|week|month)
+    #[command(
+        about = "TOTAL-only per-app history (day|week|month)",
+        long_about = "Show daemon-recorded per-app usage history. This view is TOTAL-only; short flows may appear as unknown."
+    )]
     TopApps {
         #[arg(long, value_enum, default_value = "day")]
         period: db::Window,
@@ -117,12 +205,18 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-    /// Per-app usage dashboard, auto-refreshing (daemon-recorded, no sudo needed)
+    #[command(
+        about = "TOTAL-only per-app dashboard (auto-refreshing)",
+        long_about = "Show an auto-refreshing, daemon-recorded per-app dashboard. This view is TOTAL-only and needs no sudo."
+    )]
     TopProc {
         #[arg(long, value_enum, default_value = "day")]
         period: db::Window,
     },
-    /// Per-user budget notifier (runs as systemd --user unit)
+    #[command(
+        about = "Per-user budget notifier (normally run as a systemd user unit)",
+        long_about = "Poll budget events and show desktop notifications for the current user. Run with --once for a single check, or enable packaging/netmeter-agent.service."
+    )]
     UserAgent {
         #[arg(long)]
         once: bool,
@@ -131,9 +225,27 @@ enum Cmd {
 
 #[derive(Subcommand, Debug)]
 enum ConfigOp {
-    Get { key: Option<String> },
-    Set { key: String, value: String },
+    #[command(
+        about = "Print effective configuration as JSON",
+        long_about = "Print the effective merged configuration as JSON. With KEY, print one JSON value or null."
+    )]
+    Get {
+        #[arg(value_name = "KEY")]
+        key: Option<String>,
+    },
+    #[command(
+        about = "Set one configuration key (one KEY VALUE pair per command)",
+        long_about = "Set one configuration key. Run once per key; this command does not accept multiple KEY VALUE pairs. Root writes /etc/netmeter/config.toml; other users write their ~/.config/netmeter/config.toml overlay."
+    )]
+    Set {
+        #[arg(value_name = "KEY")]
+        key: String,
+        #[arg(value_name = "VALUE")]
+        value: String,
+    },
+    /// Print system and user config paths
     Path,
+    /// Remove the current user's config overlay
     Reset,
 }
 
@@ -148,6 +260,19 @@ enum DaemonOp {
 }
 
 fn main() -> Result<()> {
+    install_broken_pipe_handler();
+
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+        Ok(result) => result,
+        // Note: &*payload (not &payload) is required here. &payload coerces to
+        // &dyn Any of the Box itself, and Box<dyn Any + Send> also implements
+        // Any, so downcast_ref::<String>() would look at the wrong concrete type.
+        Err(payload) if is_broken_pipe_payload(&*payload) => Ok(()),
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+fn run() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_writer(std::io::stderr)
@@ -169,18 +294,11 @@ fn main() -> Result<()> {
         Cmd::Export { from, to, format } => cmd_export(cfg, from, to, format),
         Cmd::Import { db, .. } => cmd_import(cfg, db),
         Cmd::Completions { shell } => {
-            use clap::CommandFactory;
             let mut cmd = Cli::command();
             clap_complete::generate(shell, &mut cmd, "netmeter", &mut std::io::stdout());
             Ok(())
         }
-        Cmd::Manpage => {
-            use clap::CommandFactory;
-            let cmd = Cli::command();
-            let man = clap_mangen::Man::new(cmd);
-            man.render(&mut std::io::stdout())?;
-            Ok(())
-        }
+        Cmd::Manpage => render_manpage(),
         Cmd::Daemon { op } => cmd_daemon(cfg, op),
         Cmd::TopApps {
             period,
@@ -190,6 +308,55 @@ fn main() -> Result<()> {
         Cmd::TopProc { period } => top_proc::run(cfg, period),
         Cmd::UserAgent { once } => user_agent::run(cfg, once),
     }
+}
+
+fn install_broken_pipe_handler() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if !is_broken_pipe_payload(info.payload()) {
+            default_hook(info);
+        }
+    }));
+}
+
+fn is_broken_pipe_payload(payload: &(dyn std::any::Any + Send)) -> bool {
+    if let Some(message) = payload.downcast_ref::<&'static str>() {
+        return is_broken_pipe_message(message);
+    }
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return is_broken_pipe_message(message);
+    }
+    if let Some(error) = payload.downcast_ref::<std::io::Error>() {
+        return error.raw_os_error() == Some(libc::EPIPE);
+    }
+    false
+}
+
+fn is_broken_pipe_message(message: &str) -> bool {
+    message.contains("Broken pipe")
+}
+
+fn render_manpage() -> Result<()> {
+    print!("{}", render_manpage_text()?);
+    Ok(())
+}
+
+fn render_manpage_text() -> Result<String> {
+    let mut output = Vec::new();
+    let cmd = Cli::command().disable_help_subcommand(true);
+    clap_mangen::Man::new(cmd).render(&mut output)?;
+    let rendered = std::str::from_utf8(&output).context("man page is not UTF-8")?;
+    Ok(normalize_manpage(rendered))
+}
+
+fn normalize_manpage(man: &str) -> String {
+    let mut normalized = man.to_owned();
+    for subcommand in MAN_SUBCOMMANDS {
+        let escaped = subcommand.replace('-', r"\-");
+        let reference = format!("netmeter\\-{escaped}(1)");
+        normalized = normalized.replace(&reference, &format!("netmeter {subcommand}"));
+    }
+    normalized
 }
 
 // ---------- show ----------
@@ -870,7 +1037,8 @@ fn sudo_user_home() -> Option<std::path::PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::INSTALL_BIN;
+    use super::{is_broken_pipe_payload, render_manpage_text, Cli, INSTALL_BIN, MAN_SUBCOMMANDS};
+    use clap::CommandFactory;
 
     #[test]
     fn embedded_units_match_packaging() {
@@ -891,6 +1059,49 @@ mod tests {
             assert!(
                 !embedded.contains("{{") && !embedded.contains("}}"),
                 "{path} leaks template placeholder"
+            );
+        }
+    }
+
+    #[test]
+    fn recognizes_broken_pipe_payload() {
+        let payload: Box<dyn std::any::Any + Send> =
+            Box::new("failed printing to stdout: Broken pipe (os error 32)");
+        assert!(is_broken_pipe_payload(&*payload));
+    }
+
+    #[test]
+    fn ignores_unrelated_panic_payloads() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new("ordinary panic");
+        assert!(!is_broken_pipe_payload(&*payload));
+    }
+
+    #[test]
+    fn long_help_shows_common_workflows_and_config_arity() {
+        let help = Cli::command().render_long_help().to_string();
+        assert!(help.contains("COMMON WORKFLOWS"));
+        assert!(help.contains("sudo netmeter config set budget_gb 2"));
+        assert!(help.contains("sudo netmeter config set budget_period month"));
+        assert!(help.contains("one <KEY> <VALUE> pair"));
+
+        let mut command = Cli::command();
+        let config = command
+            .find_subcommand_mut("config")
+            .expect("config subcommand");
+        let set = config.find_subcommand_mut("set").expect("config set");
+        let set_help = set.render_long_help().to_string();
+        assert!(set_help.contains("<KEY> <VALUE>"));
+        assert!(set_help.contains("does not accept multiple KEY VALUE pairs"));
+    }
+
+    #[test]
+    fn manpage_uses_literal_subcommand_syntax() {
+        let man = render_manpage_text().expect("render man page");
+        for subcommand in MAN_SUBCOMMANDS {
+            let escaped = subcommand.replace('-', r"\-");
+            assert!(
+                !man.contains(&format!("netmeter\\-{escaped}(1)")),
+                "man page references missing subcommand page for {subcommand}"
             );
         }
     }

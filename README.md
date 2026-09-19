@@ -148,6 +148,11 @@ crates.io when `CARGO_REGISTRY_TOKEN` is set, then attaches `.deb`/`.rpm`.
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
+To backfill an existing tag (for example, a tag created before this workflow
+existed), open **Actions → release → Run workflow**, select the `main` branch,
+and enter the exact existing tag (such as `v0.2.0`) in the **tag** field. The
+workflow validates the tag before building or publishing.
+
 Local build (needs `musl-tools`):
 
 ```sh

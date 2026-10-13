@@ -42,14 +42,15 @@ function runJson(binary, args) {
 
 const safe = (binary, args) => runJson(binary, args).catch(() => null);
 
-// Four concurrent read-only queries. Each resolves to parsed JSON or null.
+// Concurrent read-only queries; each resolves to parsed JSON or null.
 export function fetchAll(binary) {
     return Promise.all([
         safe(binary, ['status', '--json']),
+        safe(binary, ['today', '--json']),
         safe(binary, ['show', '--period', 'hour', '--json']),
         safe(binary, ['show', '--period', 'month', '--json']),
         safe(binary, ['top-apps', '--period', 'day', '--json']),
-    ]).then(([status, hourly, monthly, apps]) => ({status, hourly, monthly, apps}));
+    ]).then(([status, today, hourly, monthly, apps]) => ({status, today, hourly, monthly, apps}));
 }
 
 export function sumRows(rows) {
@@ -77,15 +78,25 @@ function todayLocalStr() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export function buildModel(binary, {status, hourly, monthly, apps}) {
+export function buildModel(binary, {status, today, hourly, monthly, apps}) {
+    // Prefer the fresh server-side `today` sum; fall back to filtering the
+    // hourly rows by today's local date when the command is unavailable.
+    let day = null;
+    if (today && typeof today.total === 'number') {
+        day = {
+            rx: today.rx, tx: today.tx, total: today.total,
+            lan_rx: today.lan_rx, lan_tx: today.lan_tx,
+            wan_rx: today.wan_rx, wan_tx: today.wan_tx,
+        };
+    } else if (hourly && hourly.rows) {
+        day = sumRows(hourly.rows.filter(r => (r.date || '').startsWith(todayLocalStr())));
+    }
     return {
         installed: binaryExists(binary),
         daemonActive: Boolean(status && status.daemon_active),
         split: Boolean(status && status.nft_split),
         version: status ? status.version : null,
-        day: hourly && hourly.rows
-            ? sumRows(hourly.rows.filter(r => (r.date || '').startsWith(todayLocalStr())))
-            : null,
+        day,
         month: monthly && monthly.rows ? lastRow(monthly.rows) : null,
         topApps: apps && apps.rows ? apps.rows : [],
     };

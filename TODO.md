@@ -228,6 +228,17 @@ reacts instantly to the toggle via `changed::show-panel-label`. Prefs row:
 the icon + label must live inside a single horizontal `St.BoxLayout` (added first
 as the button's only child). Confirmed live after re-login.
 
+### "Today" figure (2026-10-14)
+Panel number + menu now show a true **today (since local midnight)** instead of a
+rolling 24h: `dataSource.js` filters the `show --period hour` rows by the shell's
+local date (`todayLocalStr`), reusing the existing fetch (no extra subprocess).
+Labels changed "Last 24 hours" → "Today", subtitle "24h" → "Today".
+**Limit:** the daemon rolls up hourly, so the current hour lags up to ~1h.
+Upgrade path if live-fresh is wanted: add `netmeter today --json` (sum today's
+raw `samples`, ~5s fresh) and have the extension prefer it with a fallback.
+(`export --from/--to` is NOT usable for this — its date parsing is UTC-shifted
+and misses local-today on non-UTC zones.)
+
 ### Still to do
 - **Recognize + load in GNOME (BLOCKED on shell restart).** Attempted live against the running GNOME 50.5 shell: `gnome-extensions install` of a root-files zip succeeds (rc=0, schema auto-compiled) and files land in `~/.local/share/gnome-shell/extensions/<uuid>/`, but the running shell does **not** rescan the dir — netmeter is absent from the shell's authoritative `ListExtensions` with **no** load error. ext4 (inotify OK), valid metadata/schema ⇒ it's a rescan/monitor gap, not a bug in the extension. **Fix: log out/in (Wayland) to restart the shell**, then `gnome-extensions enable netmeter@4imd3v.github.io`, then check the panel/tile + `journalctl --user -o cat | grep -i netmeter`.
   - Gotcha: raw `cp` (`install-dev.sh`) also needs a restart to be recognized.

@@ -1,6 +1,6 @@
 [package]
 name = "netmeter"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 description = "Local-first LAN/WAN/TOTAL bandwidth meter for Linux"
 license = "MIT"

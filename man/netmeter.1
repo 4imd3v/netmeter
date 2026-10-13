@@ -1,6 +1,6 @@
 .ie \n(.g .ds Aq \(aq
 .el .ds Aq '
-.TH netmeter 1  "netmeter 0.2.0"
+.TH netmeter 1  "netmeter 0.2.1" 
 .SH NAME
 netmeter \- Local\-first LAN/WAN/TOTAL bandwidth meter (Linux)
 .SH SYNOPSIS
@@ -27,6 +27,9 @@ TOTAL\-only top talkers by iface or day
 .TP
 netmeter status
 Daemon, database, and LAN/WAN split status
+.TP
+netmeter today
+Today\*(Aqs usage since local midnight (LAN/WAN/TOTAL)
 .TP
 netmeter config
 Read or change one configuration key at a time
@@ -61,6 +64,7 @@ COMMON WORKFLOWS
 Recorder and dashboards:
   sudo netmeter daemon install
   netmeter status
+  netmeter today
   netmeter live
 
 History and top talkers:
@@ -90,4 +94,4 @@ NOTES
 `\-\-json` is command\-specific. `show`, `status`, and `top\-apps` include
 `api_version`; `export \-\-format json` writes a bare JSON array.
 .SH VERSION
-v0.2.0
+v0.2.1

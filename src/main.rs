@@ -30,6 +30,7 @@ COMMON WORKFLOWS
 Recorder and dashboards:
   sudo netmeter daemon install
   netmeter status
+  netmeter today
   netmeter live
 
 History and top talkers:
@@ -65,6 +66,7 @@ const MAN_SUBCOMMANDS: &[&str] = &[
     "show",
     "top",
     "status",
+    "today",
     "config",
     "export",
     "import",
@@ -150,6 +152,14 @@ enum Cmd {
         long_about = "Show daemon activity, database location and size, discarded samples, and whether LAN/WAN splitting is currently available or inferred from history."
     )]
     Status {
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
+        about = "Today's usage since local midnight (LAN/WAN/TOTAL)",
+        long_about = "Show today's usage since local midnight, summed from raw samples (fresh, ~poll interval). LAN/WAN columns appear when split data is available."
+    )]
+    Today {
         #[arg(long)]
         json: bool,
     },
@@ -290,6 +300,7 @@ fn run() -> Result<()> {
         } => cmd_show(cfg, period, from, iface, json),
         Cmd::Top { by, limit } => cmd_top(cfg, by, limit),
         Cmd::Status { json } => cmd_status(cfg, json),
+        Cmd::Today { json } => cmd_today(cfg, json),
         Cmd::Config { op } => cmd_config(cfg, op),
         Cmd::Export { from, to, format } => cmd_export(cfg, from, to, format),
         Cmd::Import { db, .. } => cmd_import(cfg, db),
@@ -744,6 +755,56 @@ fn cmd_status(cfg: Config, as_json: bool) -> Result<()> {
         wal_size
     );
     println!("discarded spike samples: {discarded}");
+    Ok(())
+}
+
+// ---------- today ----------
+fn cmd_today(cfg: Config, as_json: bool) -> Result<()> {
+    let conn = match db::open(&cfg.db_path_expanded(), true) {
+        Ok(c) => c,
+        Err(_) => {
+            if as_json {
+                println!(
+                    "{}",
+                    serde_json::json!({"api_version": db::API_VERSION, "rx": 0, "tx": 0, "total": 0, "lan_rx": 0, "lan_tx": 0, "wan_rx": 0, "wan_tx": 0})
+                );
+            } else {
+                eprintln!("no data yet — is the daemon running? (`netmeter status`, `sudo netmeter daemon install`)");
+            }
+            return Ok(());
+        }
+    };
+    let tz_local = cfg.timezone != "utc";
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let from = db::floor_day(now, tz_local);
+    // Raw samples from local midnight to now, aggregated across interfaces.
+    let rows = db::query_range(&conn, "samples", from, now + 1, None)?;
+    let rx: i64 = rows.iter().map(|r| r.rx).sum();
+    let tx: i64 = rows.iter().map(|r| r.tx).sum();
+    let lan_rx: i64 = rows.iter().map(|r| r.lan_rx).sum();
+    let lan_tx: i64 = rows.iter().map(|r| r.lan_tx).sum();
+    let dec = cfg.units == "decimal";
+    if as_json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "api_version": db::API_VERSION,
+                "rx": rx, "tx": tx, "total": rx + tx,
+                "lan_rx": lan_rx, "lan_tx": lan_tx,
+                "wan_rx": (rx - lan_rx).max(0), "wan_tx": (tx - lan_tx).max(0),
+            })
+        );
+    } else {
+        println!(
+            "Today  ↓ {}  ↑ {}  total {}",
+            fmtx::fmt_bytes(rx, dec),
+            fmtx::fmt_bytes(tx, dec),
+            fmtx::fmt_bytes(rx + tx, dec),
+        );
+    }
     Ok(())
 }
 

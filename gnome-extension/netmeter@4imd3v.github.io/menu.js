@@ -81,7 +81,7 @@ export function subtitleFor(model, units) {
         return _('daemon not running');
     if (!model.day)
         return _('no data yet');
-    return `${_('24h')} ${formatBytes(model.day.total, units === 'decimal')}`;
+    return `${_('Today')} ${formatBytes(model.day.total, units === 'decimal')}`;
 }
 
 export function fillFromModel(builder, model, units, extensionObject) {
@@ -102,7 +102,7 @@ export function fillFromModel(builder, model, units, extensionObject) {
     }
 
     if (model.day) {
-        builder.section(_('Last 24 hours'));
+        builder.section(_('Today'));
         builder.stat({icon: 'go-down-symbolic', label: _('Download'), value: formatBytes(model.day.rx, decimal)});
         builder.stat({icon: 'go-up-symbolic', label: _('Upload'), value: formatBytes(model.day.tx, decimal)});
         builder.stat({label: _('Total'), value: formatBytes(model.day.total, decimal), valueClass: 'netmeter-total'});

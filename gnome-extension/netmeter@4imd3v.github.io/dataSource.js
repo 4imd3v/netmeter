@@ -70,13 +70,22 @@ export function lastRow(rows) {
     return rows && rows.length ? rows[rows.length - 1] : null;
 }
 
+// Today's date in the shell's local timezone (matches netmeter's local-time
+// bucket labels). Assumes netmeter's timezone is "local" (the default).
+function todayLocalStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export function buildModel(binary, {status, hourly, monthly, apps}) {
     return {
         installed: binaryExists(binary),
         daemonActive: Boolean(status && status.daemon_active),
         split: Boolean(status && status.nft_split),
         version: status ? status.version : null,
-        day: hourly && hourly.rows ? sumRows(hourly.rows) : null,
+        day: hourly && hourly.rows
+            ? sumRows(hourly.rows.filter(r => (r.date || '').startsWith(todayLocalStr())))
+            : null,
         month: monthly && monthly.rows ? lastRow(monthly.rows) : null,
         topApps: apps && apps.rows ? apps.rows : [],
     };

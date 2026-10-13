@@ -212,7 +212,7 @@ Local-only: no sockets except nft netlink (root, least-cap) + user-session D-Bus
 
 ## 15. Decisions log (all LOCKED)
 
-Q1 LAN+WAN+TOTAL via nft named counters + proc totals. Q2 Linux-only MVP. Q3 per-process DEFER M2/Aya. Q4 both table+TUI. Q5 Rust single static binary (C/Python/Go rejected §0.10 history). Q6 notify via user-agent (daemon cannot). Q7 vnStat import IN M1. Q8 `netmeter` + MIT.
+Q1 LAN+WAN+TOTAL via nft named counters + proc totals. Q2 Linux-only MVP. Q3 per-process DEFER M2/Aya. Q4 both table+TUI. Q5 Rust single static binary (C/Python/Go rejected §0.10 history). Q6 notify via user-agent (daemon cannot). Q7 vnStat import IN M1. Q8 `netmeter` + MIT. Q9 GNOME Shell extension (`gnome-extension/`) is a read-only viewer reusing the CLI `--json` contract; no daemon/schema/privilege change (see TODO.md).
 
 ## 16. Research sources (Sept 2026 cut)
 

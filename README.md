@@ -249,6 +249,27 @@ The repository ships one root manual page, `man/netmeter.1`. It documents the
 top-level command and its subcommands; there are no separate
 `netmeter-live(1)`, `netmeter-show(1)`, or similar pages.
 
+## GNOME Shell extension
+
+An optional GNOME Shell extension lives in `gnome-extension/`. It shows NetMeter
+usage as a top-bar indicator and a Quick Settings tile. It is a **read-only
+viewer**: it runs unprivileged, calls the `netmeter` CLI (`status`, `show`,
+`top-apps` with `--json`), and never writes the database or sends anything over
+the network. It needs the `netmeter` binary and a running daemon, and GNOME 45+
+(developed against GNOME 50).
+
+Install for the current user and enable:
+
+```sh
+./gnome-extension/install-dev.sh
+gnome-extensions enable netmeter@4imd3v.github.io
+```
+
+The tile and menu show last-24-hour and this-month TOTAL, plus LAN/WAN when the
+split is available (otherwise a TOTAL-only note, matching `netmeter status`).
+Preferences set the poll interval, the `netmeter` binary path, units, and how
+many top apps to list.
+
 ## Development and releases
 
 ```sh

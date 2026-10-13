@@ -6,7 +6,7 @@ import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {NetMeterIndicator} from './indicator.js';
 import {NetMeterTile} from './tile.js';
-import {fetchAll, buildModel} from './dataSource.js';
+import {fetchAll, buildModel, formatBytes} from './dataSource.js';
 
 export default class NetMeter extends Extension {
     enable() {
@@ -20,6 +20,7 @@ export default class NetMeter extends Extension {
         Main.panel.addToStatusArea(this.uuid, this._indicator);
 
         this._settingsChangedId = this._settings.connect('changed', () => this._startTimer());
+        this._panelLabelChangedId = this._settings.connect('changed::show-panel-label', () => this._updatePanelLabel(this._model));
         this._startTimer();
         this._poll();
     }
@@ -32,6 +33,10 @@ export default class NetMeter extends Extension {
         if (this._settingsChangedId) {
             this._settings.disconnect(this._settingsChangedId);
             this._settingsChangedId = 0;
+        }
+        if (this._panelLabelChangedId) {
+            this._settings.disconnect(this._panelLabelChangedId);
+            this._panelLabelChangedId = 0;
         }
         this._indicator?.destroy();
         this._indicator = null;
@@ -60,5 +65,17 @@ export default class NetMeter extends Extension {
         this._model = buildModel(binary, data);
         this._tile?.update(this._model, units);
         this._indicator?.update(this._model, units, this);
+        this._updatePanelLabel(this._model);
+    }
+
+    // Keep the panel usage number in sync with the model and the user toggle.
+    _updatePanelLabel(model) {
+        if (!this._indicator)
+            return;
+        const show = this._settings.get_boolean('show-panel-label');
+        const decimal = this._settings.get_string('units') === 'decimal';
+        const ready = model && model.installed && model.daemonActive && model.day;
+        const text = ready ? formatBytes(model.day.total, decimal) : '';
+        this._indicator.setPanelLabel(text, show);
     }
 }

@@ -1,1 +1,28 @@
-/* NetMeter extension styles (kept minimal). */
+/* NetMeter extension styles. */
+
+.netmeter-row {
+    spacing: 12px;
+}
+
+.netmeter-icon {
+    icon-size: 16px;
+}
+
+/* Indent LAN/WAN and per-app rows under their section. */
+.netmeter-indent {
+    padding-left: 30px;
+}
+
+.netmeter-value {
+    font-weight: normal;
+}
+
+/* The headline figure for each period. */
+.netmeter-total {
+    font-weight: bold;
+}
+
+/* Optional usage number beside the top-bar icon. */
+.netmeter-panel-label {
+    padding-left: 6px;
+}

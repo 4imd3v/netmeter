@@ -23,5 +23,10 @@
       <summary>Top apps to show</summary>
       <description>How many top apps to list in the menu.</description>
     </key>
+    <key name="show-panel-label" type="b">
+      <default>true</default>
+      <summary>Show usage number in the panel</summary>
+      <description>Show the last-24h total next to the top-bar icon.</description>
+    </key>
   </schema>
 </schemalist>

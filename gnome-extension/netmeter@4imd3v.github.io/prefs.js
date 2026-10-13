@@ -25,6 +25,14 @@ export default class NetMeterPreferences extends ExtensionPreferences {
         pollRow.connect('notify::value', () => settings.set_int('poll-interval', pollRow.value));
         group.add(pollRow);
 
+        const panelLabelRow = new Adw.SwitchRow({
+            title: 'Show usage in panel',
+            subtitle: 'Display the last-24h total next to the top-bar icon',
+            active: settings.get_boolean('show-panel-label'),
+        });
+        settings.bind('show-panel-label', panelLabelRow, 'active', Gio.SettingsBindFlags.DEFAULT);
+        group.add(panelLabelRow);
+
         const binaryRow = new Adw.EntryRow({title: 'netmeter binary'});
         binaryRow.text = settings.get_string('binary-path');
         binaryRow.connect('changed', () => settings.set_string('binary-path', binaryRow.text));

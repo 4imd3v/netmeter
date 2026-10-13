@@ -1,7 +1,12 @@
 // Shell-only helpers for building popup menus (NOT imported by prefs.js).
+import St from 'gi://St';
+import Clutter from 'gi://Clutter';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {formatBytes} from './dataSource.js';
+
+const ARROW_DOWN = '\u2193'; // ↓
+const ARROW_UP = '\u2191'; // ↑
 
 export class MenuBuilder {
     constructor(menu) {
@@ -21,6 +26,39 @@ export class MenuBuilder {
         return item;
     }
 
+    section(text) {
+        return this._add(new PopupMenu.PopupSeparatorMenuItem(text));
+    }
+
+    separator() {
+        return this._add(new PopupMenu.PopupSeparatorMenuItem());
+    }
+
+    // A two-column row: optional icon + label on the left, value right-aligned.
+    stat({icon = null, label, value, valueClass = 'netmeter-value', indent = false} = {}) {
+        const item = new PopupMenu.PopupBaseMenuItem({
+            reactive: false,
+            can_focus: false,
+            style_class: 'netmeter-row',
+        });
+        if (indent)
+            item.add_style_class_name('netmeter-indent');
+        if (icon)
+            item.add_child(new St.Icon({icon_name: icon, style_class: 'netmeter-icon', icon_size: 16}));
+        item.add_child(new St.Label({
+            text: label,
+            y_align: Clutter.ActorAlign.CENTER,
+        }));
+        item.add_child(new St.Label({
+            text: value,
+            x_expand: true,
+            x_align: Clutter.ActorAlign.END,
+            y_align: Clutter.ActorAlign.CENTER,
+            style_class: valueClass,
+        }));
+        return this._add(item);
+    }
+
     row(text) {
         return this._add(new PopupMenu.PopupMenuItem(text, {reactive: false}));
     }
@@ -30,21 +68,10 @@ export class MenuBuilder {
         item.connect('activate', callback);
         return item;
     }
-
-    separator() {
-        return this._add(new PopupMenu.PopupSeparatorMenuItem());
-    }
 }
 
-function usageRows(builder, title, totals, split, decimal) {
-    builder.row(`${title}: ${formatBytes(totals.total, decimal)}`);
-    builder.row(`  ↓ ${formatBytes(totals.rx, decimal)}     ↑ ${formatBytes(totals.tx, decimal)}`);
-    if (split) {
-        builder.row(`  LAN  ↓ ${formatBytes(totals.lan_rx, decimal)}     ↑ ${formatBytes(totals.lan_tx, decimal)}`);
-        builder.row(`  WAN  ↓ ${formatBytes(totals.wan_rx, decimal)}     ↑ ${formatBytes(totals.wan_tx, decimal)}`);
-    } else {
-        builder.row('  TOTAL-only (no LAN/WAN split)');
-    }
+function splitValue(rx, tx, decimal) {
+    return `${ARROW_DOWN} ${formatBytes(rx, decimal)}   ${ARROW_UP} ${formatBytes(tx, decimal)}`;
 }
 
 export function subtitleFor(model, units) {
@@ -74,20 +101,33 @@ export function fillFromModel(builder, model, units, extensionObject) {
         return;
     }
 
-    if (model.day)
-        usageRows(builder, _('Last 24 hours'), model.day, model.split, decimal);
-    else
+    if (model.day) {
+        builder.section(_('Last 24 hours'));
+        builder.stat({icon: 'go-down-symbolic', label: _('Download'), value: formatBytes(model.day.rx, decimal)});
+        builder.stat({icon: 'go-up-symbolic', label: _('Upload'), value: formatBytes(model.day.tx, decimal)});
+        builder.stat({label: _('Total'), value: formatBytes(model.day.total, decimal), valueClass: 'netmeter-total'});
+        if (model.split) {
+            builder.stat({label: _('LAN'), value: splitValue(model.day.lan_rx, model.day.lan_tx, decimal), indent: true});
+            builder.stat({label: _('WAN'), value: splitValue(model.day.wan_rx, model.day.wan_tx, decimal), indent: true});
+        } else {
+            builder.row(`  ${_('TOTAL-only (no LAN/WAN split)')}`);
+        }
+    } else {
         builder.row(_('No data yet'));
+    }
 
-    if (model.month)
-        usageRows(builder, _('This month'), model.month, model.split, decimal);
+    if (model.month) {
+        builder.section(_('This month'));
+        builder.stat({label: _('Total'), value: formatBytes(model.month.total, decimal), valueClass: 'netmeter-total'});
+        if (model.split)
+            builder.stat({label: _('WAN'), value: splitValue(model.month.wan_rx, model.month.wan_tx, decimal), indent: true});
+    }
 
     if (model.topApps.length) {
-        builder.separator();
-        builder.row(_('Top apps · today'));
+        builder.section(_('Top apps · today'));
         const limit = extensionObject.getSettings().get_int('apps-limit');
         for (const app of model.topApps.slice(0, limit))
-            builder.row(`  ${app.app}  ${formatBytes(app.total, decimal)}`);
+            builder.stat({label: app.app, value: formatBytes(app.total, decimal), indent: true});
     }
 
     builder.separator();

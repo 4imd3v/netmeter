@@ -1,0 +1,11 @@
+{
+    "uuid": "netmeter@4imd3v.github.io",
+    "name": "NetMeter",
+    "description": "Local LAN/WAN/TOTAL bandwidth usage in the top bar and system menu.",
+    "shell-version": ["50"],
+    "url": "https://github.com/4imd3v/netmeter",
+    "gettext-domain": "netmeter@4imd3v.github.io",
+    "settings-schema": "org.gnome.shell.extensions.netmeter",
+    "session-modes": ["user"],
+    "version": 1
+}

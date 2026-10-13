@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.netmeter" path="/org/gnome/shell/extensions/netmeter/">
+    <key name="poll-interval" type="i">
+      <default>30</default>
+      <range min="5" max="600"/>
+      <summary>Poll interval (seconds)</summary>
+      <description>How often to query netmeter for updated usage.</description>
+    </key>
+    <key name="binary-path" type="s">
+      <default>'netmeter'</default>
+      <summary>netmeter binary</summary>
+      <description>Path or name of the netmeter executable.</description>
+    </key>
+    <key name="units" type="s">
+      <default>'binary'</default>
+      <summary>Units</summary>
+      <description>'binary' (KiB/MiB/GiB) or 'decimal' (kB/MB/GB).</description>
+    </key>
+    <key name="apps-limit" type="i">
+      <default>5</default>
+      <range min="1" max="20"/>
+      <summary>Top apps to show</summary>
+      <description>How many top apps to list in the menu.</description>
+    </key>
+  </schema>
+</schemalist>

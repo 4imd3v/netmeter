@@ -191,10 +191,47 @@ only the `netmeter` binary on `PATH`; config/DB-path resolution stays in the CLI
 - `buildModel` + `formatBytes` + aggregation exercised in Node against live data
   (24h total, WAN split, month total, top apps, empty-DB + missing-binary cases).
 
+### Design pass (2026-10-14)
+Replaced the plain text dump in `menu.js` with aligned two-column rows: directional
+icons (`go-down/up-symbolic`), sectioned headers (`PopupSeparatorMenuItem`),
+label-left / value-right layout, bold Total, and indented LAN/WAN + per-app
+rows. Shared by the panel menu and the Quick Settings tile. Styling in
+`stylesheet.css` (`.netmeter-row`, `.netmeter-total`, `.netmeter-indent`).
+Pushed to the live install; loads ACTIVE with no JS errors. Needs a shell
+re-login to guarantee the visual refresh (module cache).
+
+New menu layout:
+```
+── Last 24 hours ──
+[↓] Download         407.9 MiB
+[↑] Upload            19.3 MiB
+    Total            427.3 MiB   (bold)
+      LAN     ↓ 407.9 MiB  ↑ 19.3 MiB
+      WAN     ↓ 407.9 MiB  ↑ 19.3 MiB
+── This month ──
+    Total             45.0 GiB   (bold)
+── Top apps · today ──
+      curl            79.7 MiB
+      helium          21.0 MiB
+──────────────────
+Preferences
+```
+
+### Panel usage label (2026-10-14) — ✅ verified working
+New GSettings key `show-panel-label` (bool, default **true**). When on, the top-bar
+`PanelMenu.Button` shows the last-24h total as a `St.Label` beside the icon
+(`indicator.js::setPanelLabel`); `extension.js` keeps it in sync on every poll and
+reacts instantly to the toggle via `changed::show-panel-label`. Prefs row:
+"Show usage in panel" (`Adw.SwitchRow`).
+
+**Fix that made it render:** a `PanelMenu.Button` paints effectively one child, so
+the icon + label must live inside a single horizontal `St.BoxLayout` (added first
+as the button's only child). Confirmed live after re-login.
+
 ### Still to do
-- **Load in a nested GNOME 50 session** and confirm: enable, no JS errors in
-  `journalctl`, tile + panel render, `disable()` clean (see §7). This is the real
-  test — nothing has run inside GNOME Shell yet.
+- **Recognize + load in GNOME (BLOCKED on shell restart).** Attempted live against the running GNOME 50.5 shell: `gnome-extensions install` of a root-files zip succeeds (rc=0, schema auto-compiled) and files land in `~/.local/share/gnome-shell/extensions/<uuid>/`, but the running shell does **not** rescan the dir — netmeter is absent from the shell's authoritative `ListExtensions` with **no** load error. ext4 (inotify OK), valid metadata/schema ⇒ it's a rescan/monitor gap, not a bug in the extension. **Fix: log out/in (Wayland) to restart the shell**, then `gnome-extensions enable netmeter@4imd3v.github.io`, then check the panel/tile + `journalctl --user -o cat | grep -i netmeter`.
+  - Gotcha: raw `cp` (`install-dev.sh`) also needs a restart to be recognized.
+  - Gotcha: the zip for `gnome-extensions install` must have the files at the zip **root** (uuid comes from `metadata.json`), not wrapped in a `<uuid>/` subdir.
 - Confirm the Debian mutter-devkit package name for nested testing (§10).
 - Watch-items that only a live session can catch: `this.subtitle` updates on the
   QuickToggle, `menu.setHeader`, `addExternalIndicator`, `toggleMode:false`

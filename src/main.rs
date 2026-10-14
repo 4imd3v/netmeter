@@ -1093,7 +1093,11 @@ fn daemon_install(cfg: &Config) -> Result<()> {
         );
     }
     run_systemctl(&["daemon-reload"])?;
-    run_systemctl(&["enable", "--now", "netmeter.service"])?;
+    // enable for boot, then restart. `enable --now` is a no-op on an already
+    // active service, so an upgrade left the daemon running the *old* binary
+    // while the installer reported "enabled+started".
+    run_systemctl(&["enable", "netmeter.service"])?;
+    run_systemctl(&["restart", "netmeter.service"])?;
     println!(
         "netmeter.service enabled+started. DB: {}",
         cfg.db_path_expanded().display()

@@ -171,6 +171,15 @@ fi
 
 echo
 echo "Done. Try: netmeter status && netmeter show --period day"
+# ~/.cargo/bin (cargo install / make deploy) precedes /usr/bin in most PATHs, so a
+# release install can succeed while the shell keeps running an older copy.
+resolved="$(command -v netmeter 2>/dev/null || true)"
+if [ -n "$resolved" ] && [ "$resolved" != "$PREFIX/netmeter" ]; then
+	shadow_ver="$("$resolved" --version 2>/dev/null || echo 'an older build')"
+	echo "Note: $resolved shadows $PREFIX/netmeter in PATH —"
+	echo "      'netmeter' still runs $shadow_ver."
+	echo "      Remove it, or refresh it (cargo install --locked --path .), to use this release."
+fi
 if [ "$MODE" = "user" ]; then
 	case ":$PATH:" in
 	*":$PREFIX:"*) ;;

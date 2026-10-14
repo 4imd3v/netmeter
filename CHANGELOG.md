@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-10-14
+
 ### Added
 - Tests for the capture parsers, which previously had none because they were
   inseparable from their I/O (`/proc/net/dev` is a hardcoded path, `nft` needs
@@ -14,6 +16,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   guard that the ruleset keeps its named counters. Mutation-checked.
 
 ### Fixed
+- **Per-app attribution missed every socket outside the daemon's own network
+  namespace.** `snapshot()` read only `/proc/net/{tcp,tcp6,udp,udp6}`, which
+  describes one netns; on a box also running containers or sandboxed apps their
+  sockets were invisible and their bytes landed in `unknown` — 11.8 GB of the
+  48.5 GB recorded here, 94% of it RX. One table set is now read per distinct
+  foreign netns, and our own is read last so it wins an `ip:port` collision.
 - `make man` never ran: the target name collided with the `man/` directory, so
   make considered that up-to-date "file" satisfied and skipped the recipe
   (`make: 'man' is up to date.`). Declared all targets `.PHONY` and switched to
@@ -119,7 +127,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Capture interfaces are re-resolved periodically, so a tether or VPN interface
   that appears after the daemon starts is picked up.
 
-[Unreleased]: https://github.com/4imd3v/netmeter/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/4imd3v/netmeter/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/4imd3v/netmeter/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/4imd3v/netmeter/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/4imd3v/netmeter/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/4imd3v/netmeter/compare/v0.2.1...v0.2.2

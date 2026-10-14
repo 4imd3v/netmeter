@@ -17,8 +17,13 @@ deploy: install
 deb:
 	cargo deb
 
+# `man` was a silent no-op: the target name collided with the man/ directory, so
+# make saw an up-to-date "file" and never ran the recipe (the ./target/debug path
+# was wrong too on shared-target-dir setups). .PHONY + cargo run fixes both.
+.PHONY: install deploy deb man check
+
 man:
-	./target/debug/netmeter manpage > man/netmeter.1
+	cargo run --quiet -- manpage > /tmp/netmeter.1.tmp && mv /tmp/netmeter.1.tmp man/netmeter.1
 
 check:
 	cargo fmt --check

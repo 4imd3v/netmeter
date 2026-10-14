@@ -44,6 +44,10 @@ jobs:
             echo "error: Cargo.toml version $package_version does not match release tag $tag" >&2
             exit 1
           fi
+          if ! grep -qF "[${tag#v}]" CHANGELOG.md; then
+            echo "error: CHANGELOG.md has no entry for ${tag#v}; add release notes before tagging" >&2
+            exit 1
+          fi
           git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 

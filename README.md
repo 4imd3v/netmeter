@@ -284,14 +284,15 @@ many top apps to list.
 
 ```sh
 make check
-./target/debug/netmeter manpage > man/netmeter.1
+make man          # regenerates man/netmeter.1 from the clap definitions
 ```
 
-Pushing a `v*` tag runs `.github/workflows/release.yml`, which builds static
-musl binaries for x86_64 and aarch64, verifies the archives, publishes the
-GitHub Release assets, and optionally publishes to crates.io when
+Release notes live in [CHANGELOG.md](CHANGELOG.md); add an `Unreleased` entry
+before tagging. Pushing a `v*` tag runs `.github/workflows/release.yml`, which
+builds static musl binaries for x86_64 and aarch64, verifies the archives,
+publishes the GitHub Release assets, and optionally publishes to crates.io when
 `CARGO_REGISTRY_TOKEN` is set. `.deb` and `.rpm` packages are attached after the
-binary release.
+binary release. The workflow refuses to build a tag that has no CHANGELOG entry.
 
 To backfill an existing tag, open **Actions -> release -> Run workflow**, select
 `main`, and enter the exact existing tag (for example, `v0.2.0`) in the **tag**

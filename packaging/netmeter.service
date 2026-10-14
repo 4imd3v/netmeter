@@ -11,12 +11,41 @@ AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=yes
 ProtectSystem=strict
 ProtectHome=true
 ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+SystemCallArchitectures=native
+LockPersonality=true
 ReadWritePaths=/var/lib/netmeter
+# Self-healing: systemd creates/chowns the state dir, so a wiped /var/lib does
+# not leave the daemon unable to open its DB.
+StateDirectory=netmeter
+StateDirectoryMode=0755
+# Fast clean shutdown (SIGTERM handler) but never hang a stop/reboot on it.
+TimeoutStopSec=30
+# No tight restart loop when the DB is unreadable: the 100ms default spams the journal.
+RestartSec=5
 ExecStart=/usr/bin/netmeter daemon run
 Restart=on-failure
+
+# Deliberately NOT set (each breaks this daemon or its viewers):
+#   RestrictAddressFamilies=AF_UNIX  -> needs AF_PACKET (proc_cap) + AF_NETLINK (nft/pnet)
+#   ProcSubset=pid                   -> reads /proc/net/dev and /proc/net/{tcp,udp}
+#   ProtectProc=/hidepid             -> reads /proc/<pid>/fd for socket ownership
+#   UMask=0077                       -> the DB must stay world-readable for viewers
+#   PrivateNetwork=yes               -> it meters the network
+#   SystemCallFilter=                -> netlink/AF_PACKET sets are easy to get wrong
 
 [Install]
 WantedBy=multi-user.target

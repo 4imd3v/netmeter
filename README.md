@@ -18,6 +18,13 @@ DATE                   DOWN         UP      TOTAL          LAN down/up       WAN
   kernel split; NetMeter pro-rates the global LAN total across interfaces when a
   view needs a per-interface breakdown.
 - **WAN** is derived as `TOTAL - LAN`, clamped at zero.
+- **TOTAL is exact, LAN can read low.** The kernel offloads large TCP sends
+  (GSO) *before* netfilter accounting, so one bulk transfer is counted once by
+  `/proc/net/dev` while the nftables counter sees fewer, larger segments
+  (upstream: systemd#34775, openwrt#10399). Because WAN is derived, WAN reads
+  slightly **high** on bulk traffic. Expect single-digit percent error on large
+  transfers and none on small ones. This is a kernel limitation, not a NetMeter
+  bug, and it is not fixed by eBPF/XDP either.
 - **Per-app history** is best effort. The daemon uses AF_PACKET and `/proc`
   metadata; short or unattributed flows may appear as `unknown`.
 - `top`, `top-apps`, and `top-proc` are TOTAL-only. `show` includes LAN/WAN

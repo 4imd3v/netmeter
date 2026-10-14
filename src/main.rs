@@ -1179,6 +1179,29 @@ mod tests {
     }
 
     #[test]
+    fn service_unit_keeps_what_the_daemon_needs() {
+        // Hardening that looks right but silently breaks this daemon or its
+        // unprivileged viewers (see the comment block in the unit itself).
+        let unit = include_str!("../packaging/netmeter.service");
+        // the unit documents these traps in comments; only real directives count
+        let body: Vec<&str> = unit
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('#'))
+            .collect();
+        for bad in [
+            "PrivateNetwork=yes",
+            "ProcSubset=pid",
+            "ProtectProc=invisible",
+            "UMask=",
+        ] {
+            assert!(
+                !body.iter().any(|l| l.contains(bad)),
+                "netmeter.service must not set `{bad}`"
+            );
+        }
+    }
+
+    #[test]
     fn week_rebucket_keeps_requested_iface() {
         // `show --period week --iface X --json` used to report iface "_all"
         // because rebucketing overwrote the label query_range had resolved.

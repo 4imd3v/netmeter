@@ -109,6 +109,7 @@ ExecStart=/usr/bin/netmeter daemon run
 - `max_rate_mbit`: default from `BandwidthDetection` equivalent — read `/sys/class/net/<if>/speed` (Mb/s) when present; fallback global `max_rate_mbit = 10000` (10G) + per-iface override `max_rate_mbit_<if>`. Re-detect every 5 min (`BandwidthDetectionInterval` precedent). Prevents 4GB-phantom bug (issues #40/#224/#234).
 - Overflow timing bound: 32-bit @1Gbps wraps in ~34s → 5s default poll safe; if user sets interval >30s with 32-bit iface, warn at install.
 - nft resets: ruleset flush/reboot zeroes named counters → same reset rule; daemon re-installs table on start if missing (`nft list table inet netmeter` fails → recreate from config sets).
+- **GSO undercount (known, unfixable in-kernel, documented in README)**: the kernel offloads large TCP sends *before* netfilter hooks, so `/proc/net/dev` counts one bulk transfer once while the nft counter sees fewer/larger segments (systemd#34775, openwrt#10399). LAN therefore reads slightly **low** and, because `WAN = TOTAL − LAN`, WAN reads slightly **high** on bulk traffic. No netfilter-side fix; eBPF/XDP does not bypass it either (APNIC 2026). Do not "fix" by clamping — report the limit honestly.
 - Clock: monotonic `CLOCK_MONOTONIC` for deltas, wall-clock UTC epoch for storage; refuse to write samples with wall time < last committed (NTP step back) — hold in mem until time catches up.
 
 ## 8. Storage & aggregation
@@ -189,7 +190,7 @@ budget_period = "month"
 budget_basis = "total"      # total | wan
 notify_on_budget = true
 ```
-- Build: Rust stable, `rusqlite{bundled}`, `ratatui/crossterm`, `clap{derive}`, `serde/serde_json`, `notify-rust`, `tracing`, `directories`, `jiff` (dates). MSRV = **1.85** (edition 2024 floor; raised from 1.74 in v0.2.3). `cargo install` users on older toolchains must use a release binary.
+- Build: Rust stable, `rusqlite{bundled}`, `ratatui/crossterm`, `clap{derive}`, `serde/serde_json`, `notify-rust`, `tracing`, `directories`, `jiff` (dates). MSRV = **1.85** (edition-2024 floor; raised from 1.74 when the crate moved to edition 2024). `cargo install` users on older toolchains must use a release binary.
 - Release: tag `v*` → GitHub Actions (`.github/workflows/release.yml`) builds `x86_64-unknown-linux-musl` + `aarch64-unknown-linux-musl` static (`musl-tools`, `linker=musl-gcc`, `strip`, LTO), verifies `ldd → not a dynamic executable`, packages `netmeter-$TARGET.tar.gz` + `SHA256SUMS`, creates the GitHub Release, then attaches `.deb` (`cargo-deb`) + `.rpm` (`cargo-generate-rpm`); `cargo publish` runs when `CARGO_REGISTRY_TOKEN` is set. **Primary channel: `install.sh` (curl|sh)** — verifies the checksum, installs the binary + man page, runs `daemon install`. `daemon install` copies its own binary to `/usr/bin/netmeter` (unit `ExecStart` is fixed) so cargo/curl installs start the service. AUR `packaging/aur/PKGBUILD`. x86_64 native musl + aarch64 on GitHub arm runners; `cross`/BlackDex fallback.
 - Install footprint: binary ~5–10MB stripped, deb/rpm ship binary + system unit + user-agent unit + default configs. `daemon install` creates `netmeter` user, table, units, enables both (`--system` + `--user` note: user unit enabled per-user on first login).
 

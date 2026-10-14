@@ -130,9 +130,9 @@ CREATE TABLE IF NOT EXISTS hourly(ts_hour INTEGER, iface TEXT, rx INTEGER, tx IN
 CREATE TABLE IF NOT EXISTS daily(ts_day INTEGER, iface TEXT, rx INTEGER, tx INTEGER, lan_rx INTEGER, lan_tx INTEGER, PRIMARY KEY(ts_day, iface)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS monthly(ts_mon INTEGER, iface TEXT, rx INTEGER, tx INTEGER, lan_rx INTEGER, lan_tx INTEGER, PRIMARY KEY(ts_mon, iface)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS budget_events(month TEXT PRIMARY KEY, crossed80 INTEGER, crossed100 INTEGER);
-CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);  -- schema_version, nft_ok, discarded_samples
+CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);  -- schema_version, nft_ok, discarded_samples, last_rollup_ts
 ```
-- Rollups: computed in-daemon every hour (hours→days at midnight local, months on 1st) + on-demand backfill in CLI if gap detected. Boundaries in **local time** (procflow ADR-0003 precedent), week Monday ISO, month calendar, `timezone = local|utc` config.
+- Rollups: computed in-daemon every hour (hours→days at midnight local, months on 1st) + on-demand backfill in CLI if gap detected. Boundaries in **local time** (procflow ADR-0003 precedent), week Monday ISO, month calendar, `timezone = local|utc` config. **Incremental**: `meta.last_rollup_ts` records the newest sample already folded in, so buckets are added to (`+=`) instead of rebuilt — rebuilding from `samples` would truncate every rollup to `retention_days_raw`, making `retention_days_hourly=365` a no-op.
 - Retention: `retention_days_raw=30` (5s rows ≈ 17k/day/iface ≈ ~2MB/day → 30d ≈ 60MB worst case, vacuum weekly), `retention_days_hourly=365`, daily/monthly unbounded (tiny). `VACUUM INTO backup` for export/backup; never raw file copy while daemon runs.
 - Size math documented in `status` (`db_size`, `wal_size`, checkpoint health; warn on WAL > 50MB = checkpoint starvation from pinned reader).
 

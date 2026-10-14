@@ -703,7 +703,6 @@ fn cmd_status(cfg: Config, as_json: bool) -> Result<()> {
             .ok()
         })
         .unwrap_or(0);
-    let nft_ok = nft_direct || lan_seen > 0;
     let daemon_alive = std::process::Command::new("systemctl")
         .args(["is-active", "--quiet", "netmeter.service"])
         .status()
@@ -718,6 +717,20 @@ fn cmd_status(cfg: Config, as_json: bool) -> Result<()> {
             .ok()
         })
         .unwrap_or_else(|| "0".into());
+    // The daemon publishes its own view (it has the caps to run nft); before
+    // that key existed, fall back to "LAN bytes were ever recorded".
+    let nft_flag: Option<String> = db_conn.as_ref().and_then(|c| {
+        c.query_row("SELECT v FROM meta WHERE k='nft_ok'", [], |r| r.get(0))
+            .ok()
+    });
+    let nft_ok =
+        nft_direct || nft_flag.as_deref() == Some("on") || (nft_flag.is_none() && lan_seen > 0);
+    // PRD §8: a WAL that never shrinks means a reader is pinning it.
+    let wal_hint = if wal_size > 50 * 1024 * 1024 {
+        "  (checkpoint starvation — a long-lived reader is pinning the WAL)"
+    } else {
+        ""
+    };
     if as_json {
         println!(
             "{}",
@@ -749,10 +762,11 @@ fn cmd_status(cfg: Config, as_json: bool) -> Result<()> {
         }
     );
     println!(
-        "db:      {} ({} bytes, wal {} bytes)",
+        "db:      {} ({} bytes, wal {} bytes){}",
         db_path.display(),
         db_size,
-        wal_size
+        wal_size,
+        wal_hint
     );
     println!("discarded spike samples: {discarded}");
     Ok(())

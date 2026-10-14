@@ -125,14 +125,29 @@ pub fn render_ruleset(lan_subnets: &[String]) -> String {
 
 pub fn install_nft(lan_subnets: &[String]) -> Result<()> {
     let rs = render_ruleset(lan_subnets);
+    // `nft -f` runs the file as one transaction: `add table` on an existing
+    // table fails and aborts the whole batch, so a second `daemon install`
+    // (or a changed lan_subnets) never took effect. Drop any previous table
+    // first; `destroy` is a no-op when absent, and it is run separately with
+    // the error ignored so a missing table is not fatal.
+    let _ = Command::new("nft")
+        .args(["destroy", "table", "inet", "netmeter"])
+        .output();
     let mut child = Command::new("nft")
         .arg("-f")
         .arg("-")
         .stdin(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .spawn()?;
-    use std::io::Write;
-    child.stdin.take().unwrap().write_all(rs.as_bytes())?;
-    let st = child.wait()?;
-    anyhow::ensure!(st.success(), "nft -f failed");
+    {
+        use std::io::Write;
+        child.stdin.take().unwrap().write_all(rs.as_bytes())?;
+    } // drop stdin so nft sees EOF
+    let out = child.wait_with_output()?;
+    anyhow::ensure!(
+        out.status.success(),
+        "nft -f failed: {}",
+        String::from_utf8_lossy(&out.stderr).trim()
+    );
     Ok(())
 }

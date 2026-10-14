@@ -26,7 +26,9 @@ DATE                   DOWN         UP      TOTAL          LAN down/up       WAN
 
 If nftables or the required capabilities are unavailable, NetMeter continues in
 TOTAL-only mode. `netmeter status` reports the split state, including historical
-evidence when a current unprivileged nft query is unavailable.
+evidence when a current unprivileged nft query is unavailable. The daemon
+recreates the table from `lan_subnets` when it disappears (flushed ruleset or
+reboot), so the split recovers instead of staying TOTAL-only forever.
 
 ## Install
 

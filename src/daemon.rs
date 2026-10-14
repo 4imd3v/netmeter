@@ -1,9 +1,33 @@
 use anyhow::Result;
 use rusqlite::params;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::{capture, config::Config, db, proc_cap::ProcRecorder};
+
+/// Set by the SIGTERM/SIGINT handler; polled between ticks so `systemctl stop`
+/// shuts down within ~200ms instead of after a whole poll interval.
+static STOP: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn request_stop(_: libc::c_int) {
+    STOP.store(true, Ordering::SeqCst);
+}
+
+fn install_signal_handlers() {
+    // SAFETY: `request_stop` only stores to an AtomicBool (async-signal-safe)
+    // and `signal()` is available on every Linux libc we build against.
+    unsafe {
+        libc::signal(
+            libc::SIGTERM,
+            request_stop as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGINT,
+            request_stop as *const () as libc::sighandler_t,
+        );
+    }
+}
 
 /// Classic counter-delta with wrap/reset/sanity handling (vnStat lessons).
 /// Returns accepted delta or 0 when discarded.
@@ -45,6 +69,7 @@ pub fn max_bytes_per_tick(cfg: &Config, iface: &str) -> u64 {
 }
 
 pub fn run(cfg: Config) -> Result<()> {
+    install_signal_handlers();
     tracing::info!("netmeter daemon start, poll={}s", cfg.poll_interval_sec);
     // NTP/RTC gate: wait up to 60s for clock after 2020 (vnStat TimeSyncWait lesson)
     for _ in 0..12 {
@@ -59,7 +84,10 @@ pub fn run(cfg: Config) -> Result<()> {
         std::thread::sleep(Duration::from_secs(5));
     }
     if !capture::nft_table_exists() {
-        tracing::warn!("nft table inet netmeter missing → TOTAL-only mode (run `netmeter daemon install` as root)");
+        tracing::warn!("nft table inet netmeter missing → installing from lan_subnets");
+        if let Err(e) = capture::install_nft(&cfg.lan_subnets) {
+            tracing::warn!("nft install failed ({e}) → TOTAL-only mode");
+        }
     }
 
     let db_path = cfg.db_path_expanded();
@@ -77,10 +105,28 @@ pub fn run(cfg: Config) -> Result<()> {
     let mut last_tick = Instant::now();
     let mut last_rollup = Instant::now() - Duration::from_secs(3600);
     let mut last_retain = Instant::now();
+    let mut nft_missing_ticks = 0u32;
+    // Published in `meta.nft_ok` for unprivileged `status`, which cannot run
+    // nft itself and used to guess from "any LAN bytes ever recorded".
+    let mut nft_ok_reported: Option<bool> = None;
 
     loop {
         let interval = cfg.poll_interval_sec.max(1);
-        std::thread::sleep(Duration::from_secs(interval));
+        // Chunked sleep: a stop signal must not wait out a full poll interval
+        // (systemd's default stop timeout is 90s and the interval can be 60s).
+        for _ in 0..interval * 5 {
+            if STOP.load(Ordering::SeqCst) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        if STOP.load(Ordering::SeqCst) {
+            tracing::info!("stop requested — final rollup, retention, checkpoint");
+            let _ = db::rollup(&conn, tz_local);
+            let _ = enforce_retention(&conn, &cfg);
+            let _ = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)", []);
+            break Ok(());
+        }
         let now_wall = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
@@ -97,6 +143,36 @@ pub fn run(cfg: Config) -> Result<()> {
 
         let totals = capture::read_proc().unwrap_or_default();
         let lan_now = capture::read_nft();
+        if Some(lan_now.is_some()) != nft_ok_reported {
+            nft_ok_reported = Some(lan_now.is_some());
+            let _ = conn.execute(
+                "INSERT INTO meta(k,v) VALUES('nft_ok',?1) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                params![if nft_ok_reported == Some(true) {
+                    "on"
+                } else {
+                    "off"
+                }],
+            );
+            if nft_ok_reported == Some(false) {
+                tracing::warn!("nft split lost → recording TOTAL-only");
+            }
+        }
+        if lan_now.is_none() {
+            nft_missing_ticks += 1;
+            // PRD §7: a flushed ruleset or reboot zeroes the named counters and
+            // leaves the split silently TOTAL-only forever. Recreate the table
+            // from config once the loss looks permanent. Only when the table is
+            // really gone — reinstalling on a transient read error would
+            // destroy healthy counters and zero them.
+            if nft_missing_ticks == 12 && !capture::nft_table_exists() {
+                tracing::warn!("nft table inet netmeter unavailable — reinstalling");
+                if let Err(e) = capture::install_nft(&cfg.lan_subnets) {
+                    tracing::warn!("nft reinstall failed ({e}) — staying TOTAL-only");
+                }
+            }
+        } else {
+            nft_missing_ticks = 0;
+        }
         let (lan_rx_d, lan_tx_d) = match (prev_lan, lan_now) {
             (Some((pr, pt)), Some((nr, nt))) => {
                 let maxb = max_bytes_per_tick(&cfg, "lan");

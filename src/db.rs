@@ -91,26 +91,58 @@ impl Row {
     }
 }
 
+fn sample_row(r: &rusqlite::Row) -> rusqlite::Result<(i64, String, i64, i64, i64, i64)> {
+    Ok((
+        r.get(0)?,
+        r.get(1)?,
+        r.get(2)?,
+        r.get(3)?,
+        r.get(4)?,
+        r.get(5)?,
+    ))
+}
+
+/// Newest sample ts already folded into the rollup tables (`meta.last_rollup_ts`).
+fn rollup_marker(conn: &Connection) -> Result<Option<i64>> {
+    let v: Option<String> = conn
+        .query_row("SELECT v FROM meta WHERE k='last_rollup_ts'", [], |r| {
+            r.get(0)
+        })
+        .ok();
+    Ok(v.and_then(|s| s.parse().ok()))
+}
+
 /// Roll raw samples into hourly/daily/monthly buckets (local-time boundaries).
-/// v1: aggregate from `samples` grouped by hour/day/month floors computed in Rust
-/// (avoids SQLite timezone pitfalls), upsert into rollup tables.
+///
+/// Incremental: only samples newer than `meta.last_rollup_ts` are read and the
+/// buckets they land in are *added to* (upsert `+=`). Rebuilding the whole
+/// table from `samples` — the old v1 approach — silently truncated every
+/// rollup to `retention_days_raw`, because `samples` itself is pruned to that
+/// window while `retention_days_hourly` is 365 days (PRD §6).
+///
+/// A full rebuild still runs once, when the marker is absent (fresh DB or
+/// upgrade from the full-refresh version), and seeds the marker.
+///
+/// shortcut: a sample that lands with `ts <= marker` (wall clock stepped
+/// backwards) is never folded in; the daemon timestamps inserts with the
+/// current clock, so this needs an NTP step backwards to matter.
 pub fn rollup(conn: &Connection, tz_local: bool) -> Result<()> {
-    let mut stmt =
-        conn.prepare("SELECT ts, iface, rx_total, tx_total, lan_rx, lan_tx FROM samples")?;
+    let last = rollup_marker(conn)?;
+    let args: Vec<i64> = last.into_iter().collect();
+    let mut stmt = conn.prepare(if args.is_empty() {
+        "SELECT ts, iface, rx_total, tx_total, lan_rx, lan_tx FROM samples"
+    } else {
+        "SELECT ts, iface, rx_total, tx_total, lan_rx, lan_tx FROM samples WHERE ts > ?1"
+    })?;
     let rows: Vec<(i64, String, i64, i64, i64, i64)> = stmt
-        .query_map([], |r| {
-            Ok((
-                r.get(0)?,
-                r.get(1)?,
-                r.get(2)?,
-                r.get(3)?,
-                r.get(4)?,
-                r.get(5)?,
-            ))
-        })?
+        .query_map(rusqlite::params_from_iter(args), sample_row)?
         .filter_map(|r| r.ok())
         .collect();
     drop(stmt);
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let max_ts = rows.iter().map(|r| r.0).max().unwrap_or(0);
     use std::collections::HashMap;
     let mut h: HashMap<(i64, String), (i64, i64, i64, i64)> = HashMap::new();
     let mut d: HashMap<(i64, String), (i64, i64, i64, i64)> = HashMap::new();
@@ -128,31 +160,32 @@ pub fn rollup(conn: &Connection, tz_local: bool) -> Result<()> {
         }
     }
     let tx = conn.unchecked_transaction()?;
-    // cheap full-refresh (sample counts are small in v1: 17k rows/day/iface max)
-    tx.execute("DELETE FROM hourly", [])?;
-    tx.execute("DELETE FROM daily", [])?;
-    tx.execute("DELETE FROM monthly", [])?;
-    {
-        let mut ih = tx
-            .prepare("INSERT INTO hourly(ts_hour,iface,rx,tx,lan_rx,lan_tx) VALUES(?,?,?,?,?,?)")?;
-        for ((b, i), (rx, txx, lrx, ltx)) in &h {
-            ih.execute(params![b, i, rx, txx, lrx, ltx])?;
+    if last.is_none() {
+        // no marker: rollups may hold buckets from the old full-refresh code,
+        // which rebuilt everything from whatever `samples` still held.
+        for t in ["hourly", "daily", "monthly"] {
+            tx.execute(&format!("DELETE FROM {t}"), [])?;
         }
     }
-    {
-        let mut id =
-            tx.prepare("INSERT INTO daily(ts_day,iface,rx,tx,lan_rx,lan_tx) VALUES(?,?,?,?,?,?)")?;
-        for ((b, i), (rx, txx, lrx, ltx)) in &d {
-            id.execute(params![b, i, rx, txx, lrx, ltx])?;
+    for (table, col, map) in [
+        ("hourly", "ts_hour", &h),
+        ("daily", "ts_day", &d),
+        ("monthly", "ts_mon", &m),
+    ] {
+        let mut ins = tx.prepare(&format!(
+            "INSERT INTO {table}({col},iface,rx,tx,lan_rx,lan_tx) VALUES(?,?,?,?,?,?) \
+             ON CONFLICT({col},iface) DO UPDATE SET rx=rx+excluded.rx, tx=tx+excluded.tx, \
+             lan_rx=lan_rx+excluded.lan_rx, lan_tx=lan_tx+excluded.lan_tx"
+        ))?;
+        for ((b, i), (rx, txx, lrx, ltx)) in map {
+            ins.execute(params![b, i, rx, txx, lrx, ltx])?;
         }
     }
-    {
-        let mut im = tx
-            .prepare("INSERT INTO monthly(ts_mon,iface,rx,tx,lan_rx,lan_tx) VALUES(?,?,?,?,?,?)")?;
-        for ((b, i), (rx, txx, lrx, ltx)) in &m {
-            im.execute(params![b, i, rx, txx, lrx, ltx])?;
-        }
-    }
+    tx.execute(
+        "INSERT INTO meta(k,v) VALUES('last_rollup_ts',?1) \
+         ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+        params![max_ts.to_string()],
+    )?;
     tx.commit()?;
     Ok(())
 }
@@ -317,5 +350,105 @@ pub fn period_adverb(period: &str) -> &'static str {
         "day" => "daily",
         "week" => "weekly",
         _ => "monthly",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn put(conn: &Connection, ts: i64, iface: &str, rx: i64, tx: i64) {
+        conn.execute(
+            "INSERT INTO samples(ts,iface,rx_total,tx_total,lan_rx,lan_tx) VALUES(?,?,?,?,?,?)
+             ON CONFLICT(ts,iface) DO UPDATE SET rx_total=excluded.rx_total, tx_total=excluded.tx_total,
+             lan_rx=excluded.lan_rx, lan_tx=excluded.lan_tx",
+            params![ts, iface, rx, tx, 0, 0],
+        )
+        .unwrap();
+    }
+
+    fn bucket(conn: &Connection, table: &str, col: &str, at: i64) -> i64 {
+        conn.query_row(
+            &format!("SELECT COALESCE(rx,0) FROM {table} WHERE {col}=?1 AND iface='eth0'"),
+            params![at],
+            |r| r.get(0),
+        )
+        .unwrap_or(-1)
+    }
+
+    #[test]
+    fn first_rollup_seeds_marker() {
+        let conn = Connection::open_in_memory().unwrap();
+        init(&conn).unwrap();
+        let t = 1_800_000_000;
+        put(&conn, t, "eth0", 100, 10);
+        rollup(&conn, false).unwrap();
+        assert_eq!(
+            bucket(&conn, "hourly", "ts_hour", floor_hour(t, false)),
+            100
+        );
+        assert_eq!(bucket(&conn, "daily", "ts_day", floor_day(t, false)), 100);
+        let m: String = conn
+            .query_row("SELECT v FROM meta WHERE k='last_rollup_ts'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(m, t.to_string());
+    }
+
+    #[test]
+    fn rollup_accumulates_only_new_samples() {
+        let conn = Connection::open_in_memory().unwrap();
+        init(&conn).unwrap();
+        let t = 1_800_000_000;
+        put(&conn, t, "eth0", 100, 10);
+        rollup(&conn, false).unwrap();
+        // more traffic in the same hour → same bucket, accumulated
+        put(&conn, t + 60, "eth0", 50, 5);
+        rollup(&conn, false).unwrap();
+        assert_eq!(
+            bucket(&conn, "hourly", "ts_hour", floor_hour(t, false)),
+            150
+        );
+        // a later hour opens a new bucket and leaves the old one intact
+        let t2 = t + 7200;
+        put(&conn, t2, "eth0", 7, 1);
+        rollup(&conn, false).unwrap();
+        assert_eq!(
+            bucket(&conn, "hourly", "ts_hour", floor_hour(t, false)),
+            150
+        );
+        assert_eq!(bucket(&conn, "hourly", "ts_hour", floor_hour(t2, false)), 7);
+    }
+
+    /// Regression: the full-refresh rollup rebuilt hourly/daily/monthly from
+    /// `samples`, which retention prunes to `retention_days_raw` (30d) while
+    /// hourly is meant to keep 365d. Every hourly rollup therefore deleted all
+    /// history older than 30 days, so `retention_days_hourly` did nothing.
+    #[test]
+    fn rollup_keeps_history_older_than_raw_retention() {
+        let conn = Connection::open_in_memory().unwrap();
+        init(&conn).unwrap();
+        let old = 1_700_000_000; // ~9 months back
+        put(&conn, old, "eth0", 4096, 0);
+        rollup(&conn, false).unwrap();
+        let old_hour = floor_hour(old, false);
+        assert_eq!(bucket(&conn, "hourly", "ts_hour", old_hour), 4096);
+        // retention pruned the raw samples that fed that bucket
+        conn.execute("DELETE FROM samples WHERE ts < ?1", params![old + 1])
+            .unwrap();
+        // fresh traffic arrives; the old bucket must survive the rollup
+        let now = 1_800_000_000;
+        put(&conn, now, "eth0", 20, 0);
+        rollup(&conn, false).unwrap();
+        assert_eq!(bucket(&conn, "hourly", "ts_hour", old_hour), 4096);
+        assert_eq!(
+            bucket(&conn, "daily", "ts_day", floor_day(old, false)),
+            4096
+        );
+        assert_eq!(
+            bucket(&conn, "hourly", "ts_hour", floor_hour(now, false)),
+            20
+        );
     }
 }

@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Tests for the capture parsers, which previously had none because they were
+  inseparable from their I/O (`/proc/net/dev` is a hardcoded path, `nft` needs
+  `CAP_NET_ADMIN`). Both are now pure functions, covered by a verbatim
+  `/proc/net/dev` snapshot and the `nft --json list counters` shape, plus a
+  guard that the ruleset keeps its named counters. Mutation-checked.
+
 ### Fixed
 - `make man` never ran: the target name collided with the `man/` directory, so
   make considered that up-to-date "file" satisfied and skipped the recipe

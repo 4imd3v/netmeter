@@ -369,6 +369,25 @@ fn normalize_manpage(man: &str) -> String {
 }
 
 // ---------- show ----------
+/// Bytes used inside the current budget window.
+///
+/// `rows` are bucketed (ts = bucket start) and a `show` view spans many
+/// buckets — `--period day` renders 30 daily rows. Summing the whole view
+/// compared 30 days of traffic against a *daily* budget (2313% of 2 GiB when
+/// the day itself was 1.4 GiB), so the bar must be limited to the window.
+fn budget_used(rows: &[db::Row], cfg: &Config, window_start: i64) -> i64 {
+    rows.iter()
+        .filter(|r| r.ts >= window_start)
+        .map(|r| {
+            if cfg.budget_basis == "wan" {
+                r.wan_rx() + r.wan_tx()
+            } else {
+                r.total()
+            }
+        })
+        .sum()
+}
+
 fn cmd_show(
     cfg: Config,
     period: Period,
@@ -474,16 +493,7 @@ fn cmd_show(
     };
     if let Some((bperiod, bgb)) = cfg.effective_budget() {
         if bperiod == view_period {
-            let used: i64 = rows
-                .iter()
-                .map(|r| {
-                    if cfg.budget_basis == "wan" {
-                        r.wan_rx() + r.wan_tx()
-                    } else {
-                        r.total()
-                    }
-                })
-                .sum();
+            let used = budget_used(&rows, &cfg, db::budget_window_start(now, tz_local, bperiod));
             let budget = (bgb * 1_073_741_824.0) as i64;
             let frac = used as f64 / budget as f64;
             println!(
@@ -1118,10 +1128,10 @@ fn sudo_user_home() -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, INSTALL_BIN, MAN_SUBCOMMANDS, is_broken_pipe_payload, rebucket_week,
+        Cli, INSTALL_BIN, MAN_SUBCOMMANDS, budget_used, is_broken_pipe_payload, rebucket_week,
         render_manpage_text,
     };
-    use crate::db;
+    use crate::{config::Config, db};
     use clap::CommandFactory;
 
     #[test]
@@ -1199,6 +1209,43 @@ mod tests {
                 "netmeter.service must not set `{bad}`"
             );
         }
+    }
+
+    #[test]
+    fn show_budget_bar_counts_only_the_current_window() {
+        // Regression: `show --period day` renders 30 daily rows and summed all
+        // of them against a *daily* budget (2313% of 2 GiB for a 1.4 GiB day).
+        let cfg = Config {
+            budget_gb: 2.0,
+            budget_period: "day".into(),
+            ..Default::default()
+        };
+        let today = db::floor_day(1_800_000_000, false);
+        let rows = vec![
+            db::Row {
+                ts: today - 86400,
+                iface: "_all".into(),
+                rx: 9_000,
+                tx: 1_000,
+                lan_rx: 0,
+                lan_tx: 0,
+            },
+            db::Row {
+                ts: today,
+                iface: "_all".into(),
+                rx: 10,
+                tx: 5,
+                lan_rx: 2,
+                lan_tx: 1,
+            },
+        ];
+        assert_eq!(budget_used(&rows, &cfg, today), 15);
+        // WAN basis excludes the LAN part of today's row
+        let wan = Config {
+            budget_basis: "wan".into(),
+            ..cfg.clone()
+        };
+        assert_eq!(budget_used(&rows, &wan, today), 8 + 4);
     }
 
     #[test]

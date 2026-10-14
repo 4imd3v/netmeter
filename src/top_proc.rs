@@ -59,7 +59,7 @@ fn view_loop(
                 if let crossterm::event::Event::Key(k) = crossterm::event::read()? {
                     match k.code {
                         crossterm::event::KeyCode::Char('q') | crossterm::event::KeyCode::Esc => {
-                            return Ok(())
+                            return Ok(());
                         }
                         crossterm::event::KeyCode::Char('u') => dec = !dec,
                         crossterm::event::KeyCode::Char('1') => period = db::Window::Day,

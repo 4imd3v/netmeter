@@ -46,7 +46,7 @@ fn live_loop(
     let mut week_tot = (0i64, 0i64);
     let mut month_used: i64 = 0;
     let mut month_split = (0i64, 0i64, 0i64, 0i64); // rx, tx, lan_rx, lan_tx
-                                                    // top apps come from daemon-recorded history: no capture here, no sudo needed
+    // top apps come from daemon-recorded history: no capture here, no sudo needed
     let mut app_rows_data: Vec<(String, i64, i64)> = vec![];
 
     'outer: loop {
@@ -129,20 +129,23 @@ fn live_loop(
 
         if tick_n % 5 == 1 {
             // one read-only open per refresh; daemon stays the sole writer
-            if let Ok(conn) = db::open(&cfg.db_path_expanded(), true) {
-                day_tot = query_since(&conn, db::floor_day(now_ts(), tz_local));
-                week_tot = query_week_total(&conn, tz_local);
-                let (used, split) = query_budget(&conn, cfg, tz_local);
-                month_used = used;
-                month_split = split;
-                // top apps: daemon-recorded today totals (no capture, no sudo needed)
-                app_rows_data = top_proc::today_top_apps(&conn, cfg, 12);
-            } else {
-                day_tot = (0, 0);
-                week_tot = (0, 0);
-                month_used = 0;
-                month_split = (0, 0, 0, 0);
-                app_rows_data = vec![];
+            match db::open(&cfg.db_path_expanded(), true) {
+                Ok(conn) => {
+                    day_tot = query_since(&conn, db::floor_day(now_ts(), tz_local));
+                    week_tot = query_week_total(&conn, tz_local);
+                    let (used, split) = query_budget(&conn, cfg, tz_local);
+                    month_used = used;
+                    month_split = split;
+                    // top apps: daemon-recorded today totals (no capture, no sudo needed)
+                    app_rows_data = top_proc::today_top_apps(&conn, cfg, 12);
+                }
+                Err(_) => {
+                    day_tot = (0, 0);
+                    week_tot = (0, 0);
+                    month_used = 0;
+                    month_split = (0, 0, 0, 0);
+                    app_rows_data = vec![];
+                }
             }
         }
         let uptime = started.elapsed().as_secs();

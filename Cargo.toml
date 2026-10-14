@@ -1,7 +1,7 @@
 [package]
 name = "netmeter"
 version = "0.2.2"
-edition = "2021"
+edition = "2024"
 description = "Local-first LAN/WAN/TOTAL bandwidth meter for Linux"
 license = "MIT"
 authors = ["NetMeter contributors"]
@@ -10,7 +10,7 @@ homepage = "https://github.com/4imd3v/netmeter"
 readme = "README.md"
 keywords = ["bandwidth", "network", "monitor", "cli", "linux"]
 categories = ["command-line-utilities", "network-programming"]
-rust-version = "1.74"
+rust-version = "1.85"
 exclude = [".pi/", ".nwron", "opencode.json", "TODO.md", ".github/"]
 
 [[bin]]

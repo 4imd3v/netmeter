@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::path::Path;
 
 pub const SCHEMA_VERSION: i32 = 1;
@@ -209,9 +209,13 @@ pub fn query_range(
         "SELECT ts, '_all', SUM(rx_total), SUM(tx_total), SUM(lan_rx), SUM(lan_tx) FROM samples WHERE ts>=?1 AND ts<?2 GROUP BY ts ORDER BY ts".to_string()
     } else if iface.is_some() {
         let txc = "tx";
-        format!("SELECT {col}, iface, rx, {txc}, lan_rx, lan_tx FROM {table} WHERE {col}>=?1 AND {col}<?2 AND iface=?3 ORDER BY {col}")
+        format!(
+            "SELECT {col}, iface, rx, {txc}, lan_rx, lan_tx FROM {table} WHERE {col}>=?1 AND {col}<?2 AND iface=?3 ORDER BY {col}"
+        )
     } else {
-        format!("SELECT {col}, '_all', SUM(rx), SUM(tx), SUM(lan_rx), SUM(lan_tx) FROM {table} WHERE {col}>=?1 AND {col}<?2 GROUP BY {col} ORDER BY {col}")
+        format!(
+            "SELECT {col}, '_all', SUM(rx), SUM(tx), SUM(lan_rx), SUM(lan_tx) FROM {table} WHERE {col}>=?1 AND {col}<?2 GROUP BY {col} ORDER BY {col}"
+        )
     };
     let mut stmt = conn.prepare(&sql)?;
     if let Some(f) = iface {

@@ -386,7 +386,9 @@ fn cmd_show(
                 );
                 return Ok(());
             }
-            eprintln!("no data yet — is the daemon running? (`netmeter status`, `sudo netmeter daemon install`)");
+            eprintln!(
+                "no data yet — is the daemon running? (`netmeter status`, `sudo netmeter daemon install`)"
+            );
             return Ok(());
         }
     };
@@ -786,7 +788,9 @@ fn cmd_today(cfg: Config, as_json: bool) -> Result<()> {
                     serde_json::json!({"api_version": db::API_VERSION, "rx": 0, "tx": 0, "total": 0, "lan_rx": 0, "lan_tx": 0, "wan_rx": 0, "wan_tx": 0})
                 );
             } else {
-                eprintln!("no data yet — is the daemon running? (`netmeter status`, `sudo netmeter daemon install`)");
+                eprintln!(
+                    "no data yet — is the daemon running? (`netmeter status`, `sudo netmeter daemon install`)"
+                );
             }
             return Ok(());
         }
@@ -1074,7 +1078,9 @@ fn daemon_install(cfg: &Config) -> Result<()> {
         std::fs::write(&home, user_unit).ok();
         println!("wrote {}", home.display());
     } else {
-        println!("(user agent unit) save this to ~/.config/systemd/user/netmeter-agent.service:\n{user_unit}");
+        println!(
+            "(user agent unit) save this to ~/.config/systemd/user/netmeter-agent.service:\n{user_unit}"
+        );
     }
     run_systemctl(&["daemon-reload"])?;
     run_systemctl(&["enable", "--now", "netmeter.service"])?;
@@ -1088,11 +1094,7 @@ fn daemon_install(cfg: &Config) -> Result<()> {
 fn users_home(user: &str) -> Option<std::path::PathBuf> {
     // minimal fallback: /home/<user>
     let p = std::path::PathBuf::from(format!("/home/{user}"));
-    if p.exists() {
-        Some(p)
-    } else {
-        None
-    }
+    if p.exists() { Some(p) } else { None }
 }
 
 /// Invoking (sudo) user's home: NSS-aware `getpwuid(SUDO_UID)` first
@@ -1116,8 +1118,8 @@ fn sudo_user_home() -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_broken_pipe_payload, rebucket_week, render_manpage_text, Cli, INSTALL_BIN,
-        MAN_SUBCOMMANDS,
+        Cli, INSTALL_BIN, MAN_SUBCOMMANDS, is_broken_pipe_payload, rebucket_week,
+        render_manpage_text,
     };
     use crate::db;
     use clap::CommandFactory;

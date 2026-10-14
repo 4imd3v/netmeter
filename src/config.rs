@@ -225,7 +225,7 @@ pub fn merge_value(mut base: toml::Value, over: toml::Value) -> toml::Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{glob_match, Config};
+    use super::{Config, glob_match};
 
     #[test]
     fn enum_keys_normalize_case() {

@@ -37,11 +37,11 @@ pub fn snapshot() -> Owners {
         by_ep: HashMap::new(),
         comm: HashMap::new(),
     };
-    for proto in ["tcp", "tcp6", "udp", "udp6"] {
-        let Ok(text) = std::fs::read_to_string(format!("/proc/net/{proto}")) else {
+    for path in netns_socket_tables() {
+        let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let v6 = proto.ends_with('6');
+        let v6 = path.ends_with('6');
         for line in text.lines().skip(1) {
             let f: Vec<&str> = line.split_whitespace().collect();
             if f.len() < 10 {
@@ -63,6 +63,59 @@ pub fn snapshot() -> Owners {
         }
     }
     o
+}
+
+/// `/proc/net/{tcp,tcp6,udp,udp6}` plus one table set per *other* network
+/// namespace on the box.
+///
+/// `/proc/net/*` only ever describes the caller's own netns, so sockets owned
+/// by containerised or sandboxed processes (Docker, bwrap, apps that fork a
+/// private netns) were invisible to `snapshot()` and their bytes could only
+/// land in the `unknown` bucket. Socket inodes are kernel-global, so an inode
+/// found in another netns still resolves through the `/proc/<pid>/fd` walk.
+///
+/// Our own netns is always read through `/proc/net/*` — we know we can read
+/// that, whereas a per-pid path may be unreadable.
+fn netns_socket_tables() -> Vec<String> {
+    use std::os::unix::fs::MetadataExt;
+    let ours = std::fs::metadata("/proc/self/ns/net")
+        .map(|m| (m.dev(), m.ino()))
+        .ok();
+    let mut seen: std::collections::HashSet<(u64, u64)> = std::collections::HashSet::new();
+    let mut foreign: Vec<String> = vec![];
+    let Ok(procs) = std::fs::read_dir("/proc") else {
+        return own_tables();
+    };
+    for entry in procs.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|s| s.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let Ok(md) = std::fs::metadata(format!("/proc/{pid}/ns/net")) else {
+            continue;
+        };
+        if Some((md.dev(), md.ino())) == ours || !seen.insert((md.dev(), md.ino())) {
+            continue;
+        }
+        for proto in ["tcp", "tcp6", "udp", "udp6"] {
+            foreign.push(format!("/proc/{pid}/net/{proto}"));
+        }
+    }
+    // Our own netns is appended last so it wins a local-endpoint collision: a
+    // frame addressed to one of our IPs is ours, not a container reusing the
+    // same ip:port inside its own namespace.
+    foreign.extend(own_tables());
+    foreign
+}
+
+fn own_tables() -> Vec<String> {
+    ["tcp", "tcp6", "udp", "udp6"]
+        .iter()
+        .map(|p| format!("/proc/net/{p}"))
+        .collect()
 }
 
 pub fn parse_local(s: &str, v6: bool) -> Option<(IpAddr, u16)> {
@@ -568,5 +621,56 @@ mod tests {
         ));
         // iface removed → reopen
         assert!(set_changed(&have, &[]));
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::{netns_socket_tables, own_tables};
+
+    #[test]
+    fn always_includes_our_own_netns() {
+        // We can always read /proc/net/*, so it must be there even when every
+        // per-pid path is unreadable.
+        let t = netns_socket_tables();
+        for p in ["tcp", "tcp6", "udp", "udp6"] {
+            assert!(
+                t.iter().any(|x| x == &format!("/proc/net/{p}")),
+                "missing /proc/net/{p}"
+            );
+        }
+    }
+
+    #[test]
+    fn own_tables_come_last_so_they_win_collisions() {
+        // A container can reuse an ip:port that also exists in our netns; the
+        // frame addressed to one of our IPs must map to our socket.
+        let t = netns_socket_tables();
+        let own = own_tables();
+        let tail = &t[t.len() - own.len()..];
+        assert_eq!(tail, own.as_slice(), "our own netns must be parsed last");
+    }
+
+    #[test]
+    fn no_duplicate_tables() {
+        // Each netns is represented once; a duplicate would just re-parse the
+        // same file, but a missing one loses a whole namespace.
+        let t = netns_socket_tables();
+        let mut seen = std::collections::HashSet::new();
+        for p in &t {
+            assert!(seen.insert(p), "duplicate table {p}");
+        }
+    }
+
+    #[test]
+    fn finds_foreign_netns_tables_when_they_exist() {
+        // This box has processes in private network namespaces (helium, bwrap),
+        // so the list must be longer than our own four tables.
+        let t = netns_socket_tables();
+        assert!(
+            t.len() > 4,
+            "expected per-netns tables beyond /proc/net/*, got {} entries",
+            t.len()
+        );
     }
 }

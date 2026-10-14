@@ -50,7 +50,6 @@ fn view_loop(
     let mut dec = cfg.units == "decimal";
     let local = cfg.timezone != "utc";
     let mut rows: Vec<(String, i64, i64)> = vec![];
-    let mut tick = Instant::now();
 
     loop {
         // 2s refresh cadence, keys responsive throughout
@@ -71,8 +70,6 @@ fn view_loop(
                 }
             }
         }
-        let _ = tick;
-        tick = Instant::now();
         let label = match period {
             db::Window::Day => "today",
             db::Window::Week => "since Monday",

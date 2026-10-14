@@ -21,7 +21,7 @@ fn check_once(cfg: &Config) -> Result<()> {
     if !cfg.notify_on_budget {
         return Ok(());
     }
-    if std::env::var("DBUS_SESSION_BUS_ADDRESS").is_err() && !cfg_path_has_display() {
+    if std::env::var("DBUS_SESSION_BUS_ADDRESS").is_err() && !has_display() {
         return Ok(()); // headless: log only, daemon already journaled
     }
     let conn = db::open(&cfg.db_path_expanded(), true)?;
@@ -53,7 +53,7 @@ fn check_once(cfg: &Config) -> Result<()> {
     Ok(())
 }
 
-fn cfg_path_has_display() -> bool {
+fn has_display() -> bool {
     std::env::var("DISPLAY").is_ok() || std::env::var("WAYLAND_DISPLAY").is_ok()
 }
 

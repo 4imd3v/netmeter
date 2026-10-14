@@ -145,10 +145,10 @@ CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);  -- schema_version,
 
 ## 10. CLI & TUI spec (Q4 LOCKED: both)
 
-- Framework: `clap 4 derive` (`Parser` root, `Subcommand` enum, `ValueEnum` for period/units/format). Global `--output auto|text|json`, `--no-color`, `--limit/--offset` on lists (CLI-spec 2026 pattern). `clap_complete` `completions <shell>` subcommand. `Command::debug_assert` test.
+- Framework: `clap 4 derive` (`Parser` root, `Subcommand` enum, `ValueEnum` for period/units/format). Output mode is a per-command `--json` flag; there is no global `--output`/`--no-color` (no command emits color, so `--no-color` was a no-op and was removed) and no `--limit/--offset`. `clap_complete` `completions <shell>` subcommand. `Command::debug_assert` test.
 ```
 netmeter live [--iface eth0] [--unit auto|bin|dec]
-netmeter show --period hour|day|week|month [--from YYYY-MM-DD] [--iface eth0] [--json|--no-color]
+netmeter show --period hour|day|week|month [--from YYYY-MM-DD] [--iface IFACE] [--json]
 netmeter top --by iface|day [--limit N]
 netmeter status [--json]          # daemon alive, nft ok, db size, discarded, version, api_version
 netmeter config get|set|path|reset

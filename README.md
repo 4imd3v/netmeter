@@ -208,7 +208,8 @@ system binary at `/usr/bin/netmeter`; a `--user` installation in
 
 ### Export and import
 
-`export` requires both dates. It exports raw samples, not rollups, and `--to` is
+`export` requires both dates. It exports raw samples, not rollups, summed across
+interfaces per timestamp (there is no per-interface column), and `--to` is
 inclusive. CSV uses this header:
 
 ```text

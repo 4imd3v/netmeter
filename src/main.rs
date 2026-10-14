@@ -134,12 +134,10 @@ enum Cmd {
         iface: Option<String>,
         #[arg(long)]
         json: bool,
-        #[arg(long)]
-        no_color: bool,
     },
     #[command(
         about = "TOTAL-only top talkers by iface or day",
-        long_about = "Rank all-time usage by interface or day. This view is TOTAL-only; it does not split LAN and WAN."
+        long_about = "Rank usage by interface or day, over the raw samples still in the database (bounded by retention_days_raw). This view is TOTAL-only; it does not split LAN and WAN."
     )]
     Top {
         #[arg(long, value_enum, default_value = "iface")]
@@ -509,9 +507,13 @@ fn rebucket_week(rows: Vec<db::Row>, local: bool) -> Vec<db::Row> {
     let mut m: BTreeMap<i64, db::Row> = BTreeMap::new();
     for r in rows {
         let monday_ts = db::floor_week(r.ts, local);
+        // keep the requested iface (query_range already labels aggregated rows
+        // "_all"); overwriting it made `show --period week --iface X --json`
+        // report iface "_all".
+        let iface = r.iface.clone();
         let e = m.entry(monday_ts).or_insert(db::Row {
             ts: monday_ts,
-            iface: "_all".into(),
+            iface,
             ..Default::default()
         });
         e.rx += r.rx;
@@ -533,9 +535,10 @@ fn bucket_samples(rows: Vec<db::Row>, period: &Period, local: bool) -> Vec<db::R
     let mut m: BTreeMap<i64, db::Row> = BTreeMap::new();
     for r in rows {
         let b = floor(r.ts, local);
+        let iface = r.iface.clone();
         let e = m.entry(b).or_insert(db::Row {
             ts: b,
-            iface: "_all".into(),
+            iface,
             ..Default::default()
         });
         e.rx += r.rx;
@@ -1112,7 +1115,11 @@ fn sudo_user_home() -> Option<std::path::PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_broken_pipe_payload, render_manpage_text, Cli, INSTALL_BIN, MAN_SUBCOMMANDS};
+    use super::{
+        is_broken_pipe_payload, rebucket_week, render_manpage_text, Cli, INSTALL_BIN,
+        MAN_SUBCOMMANDS,
+    };
+    use crate::db;
     use clap::CommandFactory;
 
     #[test]
@@ -1167,6 +1174,25 @@ mod tests {
         let set_help = set.render_long_help().to_string();
         assert!(set_help.contains("<KEY> <VALUE>"));
         assert!(set_help.contains("does not accept multiple KEY VALUE pairs"));
+    }
+
+    #[test]
+    fn week_rebucket_keeps_requested_iface() {
+        // `show --period week --iface X --json` used to report iface "_all"
+        // because rebucketing overwrote the label query_range had resolved.
+        let rows = vec![db::Row {
+            ts: 1_800_000_000,
+            iface: "eth0".into(),
+            rx: 10,
+            tx: 20,
+            lan_rx: 1,
+            lan_tx: 2,
+        }];
+        let out = rebucket_week(rows, false);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].iface, "eth0");
+        assert_eq!(out[0].ts, db::floor_week(1_800_000_000, false));
+        assert_eq!((out[0].rx, out[0].tx), (10, 20));
     }
 
     #[test]

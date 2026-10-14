@@ -143,7 +143,18 @@ impl Config {
         num_env("NETMETER_BUDGET_GB", &mut cfg.budget_gb);
         str_env("NETMETER_BUDGET_PERIOD", &mut cfg.budget_period);
         cfg.poll_interval_sec = cfg.poll_interval_sec.clamp(1, 60);
+        cfg.normalize();
         Ok(cfg)
+    }
+
+    /// Lowercase the enum-ish string keys so `units = "BINARY"` or
+    /// `timezone = "UTC"` behave as documented instead of silently falling back
+    /// to the other branch (every consumer compares against lowercase).
+    fn normalize(&mut self) {
+        self.units.make_ascii_lowercase();
+        self.timezone.make_ascii_lowercase();
+        self.budget_basis.make_ascii_lowercase();
+        self.budget_period.make_ascii_lowercase();
     }
 
     pub fn db_path_expanded(&self) -> PathBuf {
@@ -210,4 +221,36 @@ pub fn merge_value(mut base: toml::Value, over: toml::Value) -> toml::Value {
         }
     }
     base
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{glob_match, Config};
+
+    #[test]
+    fn enum_keys_normalize_case() {
+        // every consumer compares these against lowercase literals, so a
+        // config that says "UTC" must not silently mean local time.
+        let mut c = Config {
+            units: "BINARY".into(),
+            timezone: "UTC".into(),
+            budget_basis: "WAN".into(),
+            budget_period: "Month".into(),
+            ..Default::default()
+        };
+        c.normalize();
+        assert_eq!((c.units.as_str(), c.timezone.as_str()), ("binary", "utc"));
+        assert_eq!(
+            (c.budget_basis.as_str(), c.budget_period.as_str()),
+            ("wan", "month")
+        );
+    }
+
+    #[test]
+    fn glob_matches_prefix_patterns() {
+        assert!(glob_match("veth*", "veth1234"));
+        assert!(glob_match("lo", "lo"));
+        assert!(!glob_match("veth*", "enp3s0"));
+        assert!(!glob_match("lo", "lo0"));
+    }
 }
